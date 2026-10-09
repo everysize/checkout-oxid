@@ -1,0 +1,46 @@
+{% extends 'order_list.html.twig' %}
+
+{# Column "everysize" (Everysize\Checkout\Controller\Admin\OrderList), last before the
+   cancel/delete icons. The theme's blocks are rendered with parent() and the column is put in
+   before their last cell, so the shop's own columns stay as they are. In the header and filter
+   rows the theme's last cell spans "last name" and the icons (colspan 2); the everysize cell
+   takes over that span there. #}
+
+{% block admin_order_list_colgroup %}
+    {% set cols %}{{ parent() }}{% endset %}
+    {% set parts = cols|split('<col') %}
+    {{ parts|slice(0, parts|length - 1)|join('<col')|raw }}<col width="8%"><col{{ parts|last|raw }}
+{% endblock %}
+
+{% block admin_order_list_filter %}
+    {% set cells %}{{ parent() }}{% endset %}
+    {{ cells|replace({'colspan="2"': ''})|raw }}
+    <td valign="top" class="listfilter" height="20" colspan="2" nowrap>
+        <div class="r1"><div class="b1">
+        <select name="everysize_filter" class="folderselect" onChange="document.search.submit();">
+            <option value="">{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_ALL" }) }}</option>
+            <option value="1" {% if everysizeFilter == "1" %}SELECTED{% endif %}>{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_ONLY" }) }}</option>
+            <option value="0" {% if everysizeFilter == "0" %}SELECTED{% endif %}>{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_WITHOUT" }) }}</option>
+        </select>
+        <input class="listedit" type="text" size="8" maxlength="32" name="everysize_search" value="{{ everysizeSearch }}" title="{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_SEARCH" }) }}">
+        </div></div>
+    </td>
+{% endblock %}
+
+{% block admin_order_list_sorting %}
+    {% set cells %}{{ parent() }}{% endset %}
+    {{ cells|replace({'colspan="2"': ''})|raw }}
+    <td class="listheader" height="15" colspan="2">{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_COLUMN" }) }}</td>
+{% endblock %}
+
+{% block admin_order_list_item %}
+    {% set everysizeClass = listitem.oxorder__oxstorno.value == 1 ? "listitem3" : "listitem" ~ blWhite %}
+    {% if listitem.getId() == oxid %}
+        {% set everysizeClass = "listitem4" %}
+    {% endif %}
+    {% set cells %}{{ parent() }}{% endset %}
+    {% set parts = cells|split('<td') %}
+    {{ parts|slice(0, parts|length - 1)|join('<td')|raw }}
+    <td valign="top" class="{{ everysizeClass }} everysize_order_id" height="15"><div class="listitemfloating"><a href="Javascript:top.oxid.admin.editThis('{{ listitem.oxorder__oxid.value }}');" class="{{ everysizeClass }}">{{ everysizeOrderIds[listitem.oxorder__oxid.value] ?? "" }}</a></div></td>
+    <td{{ parts|last|raw }}
+{% endblock %}

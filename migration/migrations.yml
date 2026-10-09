@@ -1,0 +1,12 @@
+table_storage:
+  table_name: oxmigrations_everysize_checkout
+  version_column_name: version
+  version_column_length: 191
+  executed_at_column_name: executed_at
+  execution_time_column_name: execution_time
+
+migrations_paths:
+  'Everysize\Checkout\Migrations': ./data
+
+# DDL commits implicitly in MySQL; a wrapping transaction would only fail at commit.
+all_or_nothing: false

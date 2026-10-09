@@ -1,0 +1,166 @@
+{% include "headitem.html.twig" with {title: "EVERYSIZE_CHECKOUT_TITLE"|translate} %}
+
+<style>
+    .everysize { max-width: 1100px; padding: 10px 15px; }
+    .everysize h2 { font-size: 15px; margin: 22px 0 8px; }
+    .everysize table.form td { padding: 4px 10px 4px 0; vertical-align: top; }
+    .everysize table.form input[type=text], .everysize table.form input[type=password], .everysize table.form select { width: 360px; }
+    .everysize .hint { color: #666; }
+    .everysize .msg { padding: 8px 12px; margin: 10px 0; border: 1px solid; }
+    .everysize .msg.ok { background: #eef8ee; border-color: #6a6; }
+    .everysize .msg.error { background: #fbeeee; border-color: #c66; }
+    .everysize .env { font-weight: bold; }
+    .everysize .env.test { color: #a60; }
+    .everysize .env.invalid { color: #c00; }
+    .everysize code { background: #f3f3f3; padding: 2px 5px; }
+    .everysize table.protocol { border-collapse: collapse; width: 100%; }
+    .everysize table.protocol th, .everysize table.protocol td { border-bottom: 1px solid #ddd; padding: 5px 8px; text-align: left; vertical-align: top; }
+    .everysize table.protocol td.message { white-space: pre-wrap; font-family: monospace; font-size: 11px; }
+    .everysize .state-ok { color: #393; }
+    .everysize .state-error { color: #c00; font-weight: bold; }
+</style>
+
+<div class="everysize">
+    <h1>{{ translate({ ident: "EVERYSIZE_CHECKOUT_TITLE" }) }}</h1>
+
+    {% if everysizeMessage %}
+        <div class="msg {{ everysizeMessage.type }}">{{ everysizeMessage.text }}</div>
+    {% endif %}
+
+    <p>
+        {{ translate({ ident: "EVERYSIZE_CHECKOUT_ENVIRONMENT" }) }}:
+        <span class="env {{ everysizeEnvironment }}">
+            {% if everysizeEnvironment == "production" %}
+                {{ translate({ ident: "EVERYSIZE_CHECKOUT_ENV_PRODUCTION" }) }}
+            {% elseif everysizeEnvironment == "test" %}
+                {{ translate({ ident: "EVERYSIZE_CHECKOUT_ENV_TEST" }) }}
+            {% else %}
+                {{ translate({ ident: "EVERYSIZE_CHECKOUT_ENV_INVALID" }) }}
+            {% endif %}
+        </span>
+        {% if everysizeApiUrl %}<span class="hint">({{ everysizeApiUrl }})</span>{% endif %}
+        {% if everysizeEnvironmentError %}<br><span class="state-error">{{ everysizeEnvironmentError }}</span>{% endif %}
+    </p>
+
+    <form name="everysizesettings" id="everysizesettings" action="{{ oViewConf.getSelfLink()|raw }}" method="post" autocomplete="off">
+        {{ oViewConf.getHiddenSid()|raw }}
+        <input type="hidden" name="cl" value="everysize_checkout_admin">
+        <input type="hidden" name="fnc" value="save">
+
+        <h2>{{ translate({ ident: "EVERYSIZE_CHECKOUT_CREDENTIALS" }) }}</h2>
+        <p class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_CREDENTIALS_HINT" }) }}</p>
+        <table class="form">
+            <tr>
+                <td><label for="everysize_client_id">{{ translate({ ident: "EVERYSIZE_CHECKOUT_CLIENT_ID" }) }}</label></td>
+                <td><input type="text" id="everysize_client_id" name="everysize[clientId]" value="{{ everysizeClientId }}" spellcheck="false"></td>
+            </tr>
+            <tr>
+                <td><label for="everysize_client_secret">{{ translate({ ident: "EVERYSIZE_CHECKOUT_CLIENT_SECRET" }) }}</label></td>
+                <td>
+                    <input type="password" id="everysize_client_secret" name="everysize[clientSecret]" value="" autocomplete="new-password">
+                    <br><span class="hint">
+                        {% if everysizeHasSecret %}
+                            {{ translate({ ident: "EVERYSIZE_CHECKOUT_SECRET_STORED" }) }}
+                        {% else %}
+                            {{ translate({ ident: "EVERYSIZE_CHECKOUT_SECRET_MISSING" }) }}
+                        {% endif %}
+                    </span>
+                </td>
+            </tr>
+        </table>
+
+        <h2>{{ translate({ ident: "EVERYSIZE_CHECKOUT_MAPPING" }) }}</h2>
+        <table class="form">
+            <tr>
+                <td><label for="everysize_deliveryset">{{ translate({ ident: "EVERYSIZE_CHECKOUT_DELIVERYSET" }) }}</label></td>
+                <td>
+                    <select id="everysize_deliveryset" name="everysize[deliverySetId]">
+                        {% for id, title in everysizeDeliverySets %}
+                            <option value="{{ id }}" {% if id == everysizeDeliverySetId %}selected{% endif %}>{{ title }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <td><label for="everysize_carrier">{{ translate({ ident: "EVERYSIZE_CHECKOUT_CARRIER" }) }}</label></td>
+                <td>
+                    <input type="text" id="everysize_carrier" name="everysize[carrier]" value="{{ everysizeCarrier }}" list="everysize_carriers" maxlength="31">
+                    <datalist id="everysize_carriers">
+                        {% for carrier in everysizeCarriers %}<option value="{{ carrier }}">{% endfor %}
+                    </datalist>
+                </td>
+            </tr>
+            <tr>
+                <td><label for="everysize_autorefund">{{ translate({ ident: "EVERYSIZE_CHECKOUT_AUTO_REFUND" }) }}</label></td>
+                <td>
+                    <input type="hidden" name="everysize[autoRefundDecline]" value="0">
+                    <input type="checkbox" id="everysize_autorefund" name="everysize[autoRefundDecline]" value="1" {% if everysizeAutoRefundDecline %}checked{% endif %}>
+                    <span class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_AUTO_REFUND_HINT" }) }}</span>
+                </td>
+            </tr>
+        </table>
+
+        <p>
+            <input type="submit" class="edittext" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_SAVE" }) }}">
+            <input type="submit" class="edittext" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_TEST" }) }}"
+                   onclick="this.form.fnc.value='test';">
+            {% if everysizeClientId or everysizeHasSecret %}
+                <input type="submit" class="edittext" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_REMOVE_CREDENTIALS" }) }}"
+                       onclick="if (!window.confirm('{{ translate({ ident: "EVERYSIZE_CHECKOUT_REMOVE_CONFIRM" })|e('js') }}')) { return false; } this.form.fnc.value='removeCredentials';">
+            {% endif %}
+        </p>
+    </form>
+
+    <h2>{{ translate({ ident: "EVERYSIZE_CHECKOUT_SYNC" }) }}</h2>
+    <p>{{ translate({ ident: "EVERYSIZE_CHECKOUT_SYNC_HINT" }) }}</p>
+    <p><code>*/5 * * * * cd /pfad/zum/shop &amp;&amp; vendor/bin/oe-console everysize:sync</code></p>
+    <p class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_SYNC_RULES" }) }}</p>
+
+    <h2>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL" }) }} ({{ everysizeProtocolTotal }})</h2>
+    <form name="everysizeprotocol" action="{{ oViewConf.getSelfLink()|raw }}" method="post">
+        {{ oViewConf.getHiddenSid()|raw }}
+        <input type="hidden" name="cl" value="everysize_checkout_admin">
+        <select name="protocolFilter" onchange="this.form.submit();">
+            <option value="" {% if everysizeProtocolFilter == "" %}selected{% endif %}>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_ALL" }) }}</option>
+            <option value="ok" {% if everysizeProtocolFilter == "ok" %}selected{% endif %}>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_OK" }) }}</option>
+            <option value="error" {% if everysizeProtocolFilter == "error" %}selected{% endif %}>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_ERROR" }) }}</option>
+        </select>
+        {% if everysizeProtocolPages > 1 %}
+            {{ translate({ ident: "EVERYSIZE_CHECKOUT_PAGE" }) }}
+            <select name="protocolPage" onchange="this.form.submit();">
+                {% for p in 0..(everysizeProtocolPages - 1) %}
+                    <option value="{{ p }}" {% if p == everysizeProtocolPage %}selected{% endif %}>{{ p + 1 }}</option>
+                {% endfor %}
+            </select>
+        {% endif %}
+    </form>
+
+    {% if everysizeProtocol is empty %}
+        <p class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_EMPTY" }) }}</p>
+    {% else %}
+        <table class="protocol">
+            <tr>
+                <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_TIME" }) }}</th>
+                <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_STATE" }) }}</th>
+                <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_TITLE" }) }}</th>
+                <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_MESSAGE" }) }}</th>
+            </tr>
+            {% for entry in everysizeProtocol %}
+                <tr>
+                    <td style="white-space: nowrap;">{{ entry.CREATED }}</td>
+                    <td>
+                        {% if entry.STATE == 1 %}
+                            <span class="state-ok">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_OK" }) }}</span>
+                        {% else %}
+                            <span class="state-error">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_ERROR" }) }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ entry.TITLE }}</td>
+                    <td class="message">{{ entry.MESSAGE }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</div>
+
+{% include "bottomitem.html.twig" %}

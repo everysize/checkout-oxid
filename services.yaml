@@ -1,0 +1,43 @@
+services:
+  _defaults:
+    autowire: true
+    public: false
+
+  Everysize\Checkout\Settings:
+    public: true
+
+  Everysize\Checkout\Protocol:
+    public: true
+
+  Everysize\Checkout\OrderLinks:
+    public: true
+
+  Everysize\Checkout\Api\Client:
+    public: true
+    factory: ['Everysize\Checkout\Api\ClientFactory', 'create']
+    arguments: ['@Everysize\Checkout\Settings']
+
+  Everysize\Checkout\Import\OrderImporter: ~
+
+  Everysize\Checkout\Export\StatusExporter: ~
+
+  Everysize\Checkout\Sync:
+    public: true
+
+  everysize_checkout.command.sync:
+    class: Everysize\Checkout\Command\SyncCommand
+    arguments: ['@Everysize\Checkout\Sync', 'all']
+    tags:
+      - { name: 'console.command', command: 'everysize:sync' }
+
+  everysize_checkout.command.import:
+    class: Everysize\Checkout\Command\SyncCommand
+    arguments: ['@Everysize\Checkout\Sync', 'import']
+    tags:
+      - { name: 'console.command', command: 'everysize:order:import' }
+
+  everysize_checkout.command.export:
+    class: Everysize\Checkout\Command\SyncCommand
+    arguments: ['@Everysize\Checkout\Sync', 'export']
+    tags:
+      - { name: 'console.command', command: 'everysize:order:export' }

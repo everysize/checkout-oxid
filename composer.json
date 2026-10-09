@@ -1,0 +1,53 @@
+{
+  "name": "everysize/checkout-oxid",
+  "description": "everysize Checkout – Modul für OXID eShop 7",
+  "version": "1.1.3",
+  "type": "oxideshop-module",
+  "license": "MIT",
+  "keywords": ["oxid", "oxid-eshop", "oxid-module", "everysize", "checkout", "marketplace", "sneaker"],
+  "homepage": "https://www.everysize.com",
+  "authors": [
+    {
+      "name": "everysize GmbH",
+      "homepage": "https://www.everysize.com"
+    }
+  ],
+  "support": {
+    "source": "https://github.com/everysize/checkout-oxid"
+  },
+  "require": {
+    "php": ">=8.0",
+    "ext-curl": "*",
+    "ext-json": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6"
+  },
+  "conflict": {
+    "oxid-esales/oxideshop-ce": "<7.0 || >=8.0"
+  },
+  "extra": {
+    "oxideshop": {
+      "target-directory": "everysize/checkout",
+      "blacklist-filter": [
+        "tests/**/*"
+      ]
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "Everysize\\Checkout\\": "src/",
+      "Everysize\\Checkout\\Migrations\\": "migration/data/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Everysize\\Checkout\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "platform": {
+      "php": "8.0.30"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{% include "headitem.html.twig" with {title: "GENERAL_ADMIN_TITLE"|translate} %}
+
+<style>
+    .everysize-tab h3 { font-size: 13px; margin: 18px 0 6px; }
+    .everysize-tab .hint { color: #666; }
+    .everysize-tab .msg { padding: 6px 10px; margin: 8px 0; border: 1px solid; max-width: 700px; }
+    .everysize-tab .msg.ok { background: #eef8ee; border-color: #6a6; }
+    .everysize-tab .msg.error { background: #fbeeee; border-color: #c66; }
+    /* The admin theme resets cell padding; without it label and value run together. */
+    .everysize-tab table td { padding: 2px 14px 2px 0; vertical-align: top; }
+</style>
+
+<form name="transfer" id="transfer" action="{{ oViewConf.getSelfLink()|raw }}" method="post">
+    {{ oViewConf.getHiddenSid()|raw }}
+    <input type="hidden" name="oxid" value="{{ oxid }}">
+    <input type="hidden" name="cl" value="everysize_checkout_order">
+</form>
+
+<div class="everysize-tab">
+{% if everysizeMessage %}
+    <div class="msg {{ everysizeMessage.type }}">{{ everysizeMessage.text }}</div>
+{% endif %}
+{% if everysizeLink is empty %}
+    <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_NOT_EVERYSIZE" }) }}</p>
+{% else %}
+    <table cellspacing="0" cellpadding="3" border="0">
+        <tr>
+            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORDER_ID" }) }}:</td>
+            <td class="edittext"><b>{{ everysizeLink.EVERYSIZE_ORDER_ID }}</b></td>
+        </tr>
+        <tr>
+            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PAYPAL_CAPTURE" }) }}:</td>
+            <td class="edittext"><b>{{ everysizeLink.PAYPAL_CAPTURE_ID ?: "–" }}</b></td>
+        </tr>
+        <tr>
+            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORIGINAL_EMAIL" }) }}:</td>
+            <td class="edittext">
+                {% if everysizeLink.ORIGINAL_EMAIL %}<b>{{ everysizeLink.ORIGINAL_EMAIL }}</b>{% else %}–{% endif %}
+                <span class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORIGINAL_EMAIL_HINT" }) }}</span>
+            </td>
+        </tr>
+        <tr>
+            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_IMPORTED" }) }}:</td>
+            <td class="edittext">{{ everysizeLink.CREATED }}</td>
+        </tr>
+        <tr>
+            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_NUMBER_REPORTED" }) }}:</td>
+            <td class="edittext">{{ everysizeLink.NUMBER_REPORTED ?: translate({ ident: "EVERYSIZE_CHECKOUT_NOT_YET" }) }}</td>
+        </tr>
+    </table>
+
+    {% if everysizeLink.PAYPAL_CAPTURE_ID %}
+        <h3>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_TITLE" }) }}</h3>
+        {% if everysizeRefundError %}
+            <p class="edittext hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_LOAD_FAILED" }) }} {{ everysizeRefundError }}</p>
+        {% else %}
+            <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_PAID" }) }}: <b>{{ everysizePaid }}</b> ·
+                {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_REFUNDED" }) }}: <b>{{ everysizeRefunded }}</b> ·
+                {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_OPEN" }) }}: <b>{{ everysizeOpen }}</b></p>
+            {% if everysizeRefunds is not empty %}
+                <table class="refunds">
+                    {% for refund in everysizeRefunds %}
+                        <tr class="edittext">
+                            <td>{{ refund.created }}</td>
+                            <td>{{ refund.amount }}</td>
+                            <td>{{ refund.status }}</td>
+                            <td class="hint">{{ refund.refundId }}</td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% endif %}
+        {% endif %}
+        {% if everysizeCanRefund %}
+            <form name="everysizeRefund" action="{{ oViewConf.getSelfLink()|raw }}" method="post"
+                  onsubmit="return confirm('{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_CONFIRM" })|e('js') }}'.replace('%s', this.everysize_refund_amount.value));">
+                {{ oViewConf.getHiddenSid()|raw }}
+                <input type="hidden" name="cl" value="everysize_checkout_order">
+                <input type="hidden" name="fnc" value="refund">
+                <input type="hidden" name="oxid" value="{{ oxid }}">
+                <input type="hidden" name="everysize_refund_key" value="{{ everysizeRefundKey }}">
+                <p class="edittext">
+                    {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_AMOUNT" }) }}:
+                    <input type="text" class="editinput" size="10" name="everysize_refund_amount" value="{{ everysizeOpen|replace({' €': ''}) }}">
+                    <input type="submit" class="edittext" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_BUTTON" }) }}">
+                </p>
+            </form>
+        {% endif %}
+        <p class="edittext hint">{{ translate({ ident: everysizeAutoRefundDecline ? "EVERYSIZE_CHECKOUT_PAYPAL_HINT_AUTO" : "EVERYSIZE_CHECKOUT_PAYPAL_HINT" }) }}</p>
+    {% endif %}
+
+    <p class="edittext"><b>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORTS" }) }}</b></p>
+    {% if everysizeReports is empty %}
+        <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORTS_NONE" }) }}</p>
+    {% else %}
+        <table cellspacing="0" cellpadding="3" border="0">
+            {% for report in everysizeReports %}
+                <tr>
+                    <td class="edittext">{{ report.CREATED }}</td>
+                    <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_" ~ report.KIND }) }}</td>
+                    <td class="edittext">{% if report.KIND == "refund" and report.SKU == "auto-decline" %}{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_AUTO_REFUND" }) }}{% else %}{{ report.SKU }}{% endif %}</td>
+                    <td class="edittext">{{ report.REASON }}</td>
+                    <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_RESULT_" ~ report.RESULT }) }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+{% endif %}
+</div>
+
+{% include "bottomnaviitem.html.twig" %}
+{% include "bottomitem.html.twig" %}
