@@ -1,3 +1,9 @@
+# 1.2.0
+- Reiter „everysize“ neu gegliedert: drei Abschnitte mit Überschrift – everysize-Bestellung als Infotabelle, Erstattung über everysize mit Kacheln (Bezahlt / erstattet / noch offen), Erstattungsliste mit Spaltenköpfen, beschriftetem Formular und Hinweisbox, Rückmeldungen an everysize als Tabelle (Storno und Retoure getrennt benannt, Beträge mit Währung, leere Werte als „–“)
+- Zeiten im Reiter und im Protokoll einheitlich formatiert (deutsch 14.10.2026 15:05), in der Zeitzone des Shops
+- Versand wird auch gemeldet, wenn die Bestellung zwischen „Jetzt versenden“ und dem nächsten Lauf storniert wurde: erst Versand mit Sendungsnummer, dann Retoure (vorher: Storno `MERCHANT_DECLINE`, Sendungsnummer ging verloren)
+- Automatische Erstattung nach Storno vor dem Versand nur noch, wenn über everysize noch gar nichts erstattet wurde (vorher wurde nach einer Teilerstattung im Reiter der Rest automatisch erstattet)
+
 # 1.1.3
 - Testumgebung: `EVERYSIZE_CHECKOUT_API_URL` nimmt jede `https://`-Adresse unter `everysize.com` an (ohne Port und Pfad) statt einer festen Liste; die Admin-Seite zeigt dann „Testumgebung“
 - Dokumentation und Kommentare überarbeitet

@@ -25,7 +25,7 @@ PayPal-Konto des Händlers.
 |---|---|---|
 | everysize → Shop | neue Bestellungen (`PROCESSING`, auch bereits stornierte `REVOKED`) ohne Händler-Bestellnummer | jeder Lauf |
 | Shop → everysize | OXID-Bestellnummer | direkt nach dem Import |
-| Shop → everysize | Versand mit Sendungsnummer und Versanddienstleister | Versanddatum gesetzt („Jetzt versenden“) |
+| Shop → everysize | Versand mit Sendungsnummer und Versanddienstleister | Versanddatum gesetzt („Jetzt versenden“), auch wenn die Bestellung inzwischen storniert ist |
 | Shop → everysize | Sendungsnummer nachgetragen oder korrigiert | bis 14 Tage nach der Versandmeldung, nur wenn everysize sie noch nicht hat |
 | Shop → everysize | Erstattung (ganz oder teilweise) | Button im Reiter „everysize“ |
 | Shop → everysize | volle Erstattung | automatisch nach einem Storno **vor** dem Versand (abschaltbar) |
@@ -65,6 +65,17 @@ PayPal-Konto des Händlers.
   dem Versand, nur bei `COMPLETED` und nur, wenn everysize sie nicht schon hat
   (dann nur gemerkt, „known“). everysize nimmt die wiederholte Meldung als
   Aktualisierung; die Kundin bekommt keine Mail.
+* **Versand und Storno im selben Lauf:** Ist eine Bestellung versendet
+  (Versanddatum gesetzt) und vor dem nächsten Lauf schon storniert, meldet das
+  Modul erst den Versand mit Sendungsnummer und im selben Lauf die Retoure
+  (`RETOUR`) — nicht `MERCHANT_DECLINE`, und die Sendungsnummer geht nicht
+  verloren.
+* **Reiter „everysize“:** drei Abschnitte — die everysize-Bestellung
+  (Bestellnummer, Import, Meldung der Bestellnummer, Capture-ID,
+  Original-E-Mail), die Erstattung über everysize (Bezahlt / erstattet / noch
+  offen, Liste der Erstattungen, Formular) und die Rückmeldungen an everysize
+  als Tabelle. Zeiten in der Zeitzone des Shops (PHP-Standardzeitzone), auch
+  im Protokoll.
 * **Erstattung:** Reiter „everysize“ → Betrag (vorbelegt mit dem noch offenen
   Betrag) → „Erstatten“. everysize erstattet die PayPal-Zahlung im Namen des
   Händlers (External API `POST …/orders/{id}/refunds`); jedes Formular trägt
@@ -74,7 +85,10 @@ PayPal-Konto des Händlers.
   (`MERCHANT_DECLINE`) erstattet das Modul im nächsten Lauf den vollen Betrag,
   sobald keine Position der Bestellung mehr aktiv ist (eine everysize-Bestellung
   hat ein Produkt; ein im Admin hinzugefügter Artikel verhindert die Erstattung)
-  — es wurde nichts versendet, der Kundin steht alles zu. Retouren nicht (der
+  — es wurde nichts versendet, der Kundin steht alles zu. Nur, wenn über
+  everysize noch **gar nichts** erstattet wurde (weder automatisch noch im
+  Reiter): nach einer bewussten Teilerstattung wird der Rest nicht obendrauf
+  gezahlt. Retouren nicht (der
   Händler erstattet nach Wareneingang, ggf. mit Abzug). Standard: an
   (Einstellung „Storno vor dem Versand automatisch erstatten“); erstattet
   werden nur Stornos ab dem Einschalten (`autoRefundSince`, beim Update per

@@ -1,13 +1,36 @@
 {% include "headitem.html.twig" with {title: "GENERAL_ADMIN_TITLE"|translate} %}
 
+{# Three titled sections in the colours of the admin theme: the everysize order as one info table,
+   refunds (totals, list, form, notice) and what was reported back as a table with headings. #}
 <style>
-    .everysize-tab h3 { font-size: 13px; margin: 18px 0 6px; }
-    .everysize-tab .hint { color: #666; }
-    .everysize-tab .msg { padding: 6px 10px; margin: 8px 0; border: 1px solid; max-width: 700px; }
+    .everysize-tab { max-width: 1000px; padding-bottom: 20px; }
+    .everysize-tab h3 { font-size: 15px; font-weight: 600; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #ddd; }
+    .everysize-tab h3:first-of-type { margin-top: 6px; }
+    .everysize-tab .hint { color: #888; font-size: 11px; display: block; margin-top: 2px; }
+    .everysize-tab .msg { padding: 8px 12px; margin: 8px 0 14px; border: 1px solid; border-radius: 4px; }
     .everysize-tab .msg.ok { background: #eef8ee; border-color: #6a6; }
     .everysize-tab .msg.error { background: #fbeeee; border-color: #c66; }
-    /* The admin theme resets cell padding; without it label and value run together. */
-    .everysize-tab table td { padding: 2px 14px 2px 0; vertical-align: top; }
+    .everysize-tab table.everysize-info, .everysize-tab table.everysize-grid { border-collapse: collapse; width: 100%; }
+    .everysize-tab table.everysize-info th, .everysize-tab table.everysize-info td { padding: 9px 10px; text-align: left; vertical-align: top; font-weight: normal; }
+    .everysize-tab table.everysize-info th { width: 32%; color: #666; }
+    .everysize-tab table.everysize-info tr:nth-child(odd) th, .everysize-tab table.everysize-info tr:nth-child(odd) td { background: #f3f3f3; }
+    .everysize-tab table.everysize-info { margin-bottom: 28px; }
+    .everysize-tab table.everysize-grid { margin-bottom: 14px; }
+    .everysize-tab table.everysize-grid th { text-align: left; padding: 7px 10px; border-bottom: 2px solid #ddd; text-transform: uppercase; font-size: 11px; font-weight: 600; }
+    .everysize-tab table.everysize-grid td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .everysize-tab table.everysize-grid tbody tr:nth-child(odd) td { background: #fafafa; }
+    .everysize-tab table.everysize-grid td.mono { font-family: monospace; color: #777; }
+    .everysize-tab .totals { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 16px; }
+    .everysize-tab .total { min-width: 170px; padding: 10px 16px; border: 1px solid #e3e3e3; border-radius: 4px; background: #f8f8f8; }
+    .everysize-tab .total span { display: block; color: #666; font-size: 11px; }
+    .everysize-tab .total strong { display: block; font-size: 20px; font-weight: 600; margin-top: 2px; }
+    .everysize-tab .total.open strong { color: #c02124; }
+    .everysize-tab form.refund { display: flex; align-items: flex-end; gap: 10px; margin: 6px 0 16px; }
+    .everysize-tab form.refund label { display: block; font-weight: 600; margin-bottom: 4px; }
+    .everysize-tab form.refund input[type=text] { width: 120px; }
+    .everysize-tab form.refund input[type=submit] { background: #c02124; border-color: #c02124; color: #fff; padding: 4px 16px; }
+    .everysize-tab form.refund input[type=submit]:hover { background: #941a1c; }
+    .everysize-tab .messagebox { border: 1px solid #bce8f1; margin-bottom: 28px; }
 </style>
 
 <form name="transfer" id="transfer" action="{{ oViewConf.getSelfLink()|raw }}" method="post">
@@ -23,85 +46,118 @@
 {% if everysizeLink is empty %}
     <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_NOT_EVERYSIZE" }) }}</p>
 {% else %}
-    <table cellspacing="0" cellpadding="3" border="0">
+    <h3>{{ translate({ ident: "EVERYSIZE_CHECKOUT_SECTION_ORDER" }) }}</h3>
+    <table class="everysize-info">
         <tr>
-            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORDER_ID" }) }}:</td>
-            <td class="edittext"><b>{{ everysizeLink.EVERYSIZE_ORDER_ID }}</b></td>
+            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORDER_ID" }) }}</th>
+            <td><b>{{ everysizeLink.EVERYSIZE_ORDER_ID }}</b></td>
         </tr>
         <tr>
-            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PAYPAL_CAPTURE" }) }}:</td>
-            <td class="edittext"><b>{{ everysizeLink.PAYPAL_CAPTURE_ID ?: "–" }}</b></td>
+            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_IMPORTED" }) }}</th>
+            <td>{{ everysizeImported ?: "–" }}</td>
         </tr>
         <tr>
-            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORIGINAL_EMAIL" }) }}:</td>
-            <td class="edittext">
-                {% if everysizeLink.ORIGINAL_EMAIL %}<b>{{ everysizeLink.ORIGINAL_EMAIL }}</b>{% else %}–{% endif %}
+            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_NUMBER_REPORTED" }) }}</th>
+            <td>{{ everysizeNumberReported ?: translate({ ident: "EVERYSIZE_CHECKOUT_NOT_YET" }) }}</td>
+        </tr>
+        <tr>
+            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_PAYPAL_CAPTURE" }) }}</th>
+            <td>{{ everysizeLink.PAYPAL_CAPTURE_ID ?: "–" }}</td>
+        </tr>
+        <tr>
+            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORIGINAL_EMAIL" }) }}</th>
+            <td>
+                {{ everysizeLink.ORIGINAL_EMAIL ?: "–" }}
                 <span class="hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_ORIGINAL_EMAIL_HINT" }) }}</span>
             </td>
-        </tr>
-        <tr>
-            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_IMPORTED" }) }}:</td>
-            <td class="edittext">{{ everysizeLink.CREATED }}</td>
-        </tr>
-        <tr>
-            <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_NUMBER_REPORTED" }) }}:</td>
-            <td class="edittext">{{ everysizeLink.NUMBER_REPORTED ?: translate({ ident: "EVERYSIZE_CHECKOUT_NOT_YET" }) }}</td>
         </tr>
     </table>
 
     {% if everysizeLink.PAYPAL_CAPTURE_ID %}
         <h3>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_TITLE" }) }}</h3>
         {% if everysizeRefundError %}
-            <p class="edittext hint">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_LOAD_FAILED" }) }} {{ everysizeRefundError }}</p>
+            <div class="msg error">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_LOAD_FAILED" }) }} {{ everysizeRefundError }}</div>
         {% else %}
-            <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_PAID" }) }}: <b>{{ everysizePaid }}</b> ·
-                {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_REFUNDED" }) }}: <b>{{ everysizeRefunded }}</b> ·
-                {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_OPEN" }) }}: <b>{{ everysizeOpen }}</b></p>
+            <div class="totals">
+                <div class="total">
+                    <span>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_PAID" }) }}</span>
+                    <strong>{{ everysizePaid }}</strong>
+                </div>
+                <div class="total">
+                    <span>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_REFUNDED" }) }}</span>
+                    <strong>{{ everysizeRefunded }}</strong>
+                </div>
+                <div class="total{% if everysizeIsOpen %} open{% endif %}">
+                    <span>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_OPEN" }) }}</span>
+                    <strong>{{ everysizeOpen }}</strong>
+                </div>
+            </div>
             {% if everysizeRefunds is not empty %}
-                <table class="refunds">
-                    {% for refund in everysizeRefunds %}
-                        <tr class="edittext">
-                            <td>{{ refund.created }}</td>
-                            <td>{{ refund.amount }}</td>
-                            <td>{{ refund.status }}</td>
-                            <td class="hint">{{ refund.refundId }}</td>
+                <table class="everysize-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_COL_DATE" }) }}</th>
+                            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_COL_AMOUNT" }) }}</th>
+                            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_COL_STATUS" }) }}</th>
+                            <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_COL_ID" }) }}</th>
                         </tr>
-                    {% endfor %}
+                    </thead>
+                    <tbody>
+                        {% for refund in everysizeRefunds %}
+                            <tr>
+                                <td>{{ refund.created ?: "–" }}</td>
+                                <td>{{ refund.amount }}</td>
+                                <td>{{ refund.status ?: "–" }}</td>
+                                <td class="mono">{{ refund.refundId ?: "–" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             {% endif %}
         {% endif %}
         {% if everysizeCanRefund %}
-            <form name="everysizeRefund" action="{{ oViewConf.getSelfLink()|raw }}" method="post"
+            <form name="everysizeRefund" class="refund" action="{{ oViewConf.getSelfLink()|raw }}" method="post"
                   onsubmit="return confirm('{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_CONFIRM" })|e('js') }}'.replace('%s', this.everysize_refund_amount.value));">
                 {{ oViewConf.getHiddenSid()|raw }}
                 <input type="hidden" name="cl" value="everysize_checkout_order">
                 <input type="hidden" name="fnc" value="refund">
                 <input type="hidden" name="oxid" value="{{ oxid }}">
                 <input type="hidden" name="everysize_refund_key" value="{{ everysizeRefundKey }}">
-                <p class="edittext">
-                    {{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_AMOUNT" }) }}:
-                    <input type="text" class="editinput" size="10" name="everysize_refund_amount" value="{{ everysizeOpen|replace({' €': ''}) }}">
-                    <input type="submit" class="edittext" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_BUTTON" }) }}">
-                </p>
+                <div>
+                    <label for="everysize_refund_amount">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_AMOUNT" }) }}</label>
+                    <input type="text" id="everysize_refund_amount" name="everysize_refund_amount" value="{{ everysizeOpenInput }}">
+                </div>
+                <input type="submit" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_BUTTON" }) }}">
             </form>
         {% endif %}
-        <p class="edittext hint">{{ translate({ ident: everysizeAutoRefundDecline ? "EVERYSIZE_CHECKOUT_PAYPAL_HINT_AUTO" : "EVERYSIZE_CHECKOUT_PAYPAL_HINT" }) }}</p>
+        <div class="messagebox">{{ translate({ ident: everysizeAutoRefundDecline ? "EVERYSIZE_CHECKOUT_PAYPAL_HINT_AUTO" : "EVERYSIZE_CHECKOUT_PAYPAL_HINT" }) }}</div>
     {% endif %}
 
-    <p class="edittext"><b>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORTS" }) }}</b></p>
+    <h3>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORTS" }) }}</h3>
     {% if everysizeReports is empty %}
         <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORTS_NONE" }) }}</p>
     {% else %}
-        <table cellspacing="0" cellpadding="3" border="0">
-            {% for report in everysizeReports %}
+        <table class="everysize-grid">
+            <thead>
                 <tr>
-                    <td class="edittext">{{ report.CREATED }}</td>
-                    <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_" ~ report.KIND }) }}</td>
-                    <td class="edittext">{% if report.KIND == "refund" and report.SKU == "auto-decline" %}{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_AUTO_REFUND" }) }}{% else %}{{ report.SKU }}{% endif %}</td>
-                    <td class="edittext">{{ report.REASON }}</td>
-                    <td class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_RESULT_" ~ report.RESULT }) }}</td>
+                    <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_COL_TIME" }) }}</th>
+                    <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_COL_KIND" }) }}</th>
+                    <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_COL_SUBJECT" }) }}</th>
+                    <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_COL_DETAIL" }) }}</th>
+                    <th>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REPORT_COL_RESULT" }) }}</th>
                 </tr>
-            {% endfor %}
+            </thead>
+            <tbody>
+                {% for report in everysizeReports %}
+                    <tr>
+                        <td style="white-space: nowrap;">{{ report.time }}</td>
+                        <td>{{ report.kind }}</td>
+                        <td>{{ report.subject }}</td>
+                        <td>{{ report.detail }}</td>
+                        <td>{{ report.result }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
         </table>
     {% endif %}
 {% endif %}

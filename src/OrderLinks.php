@@ -154,8 +154,13 @@ class OrderLinks
     }
 
     /**
-     * Shipped orders (shipping date set) that still have an active item and
-     * whose fulfillment has not been reported.
+     * Shipped orders (shipping date set) whose fulfillment has not been
+     * reported — also when the order or its item has been cancelled since:
+     * shipped and cancelled within one sync interval is a return, and
+     * everysize only takes RETOUR (with the tracking code) after the
+     * fulfillment. The exporter sends fulfillments before revocations.
+     * Orders whose revocation went out already are left out: everysize has
+     * them revoked, a fulfillment would only be refused.
      *
      * @return array<int, array{OXID: string, EVERYSIZE_ORDER_ID: string, OXORDERNR: string, OXTRACKCODE: string}>
      */
@@ -166,12 +171,10 @@ class OrderLinks
              FROM everysize_checkout_order l
              JOIN oxorder o ON o.OXID = l.OXID
              WHERE l.OXSHOPID = :shopId
-               AND o.OXSTORNO = 0
                AND o.OXSENDDATE > '1000-01-01 00:00:00'
-               AND EXISTS (SELECT 1 FROM oxorderarticles a WHERE a.OXORDERID = o.OXID AND a.OXSTORNO = 0)
-               AND NOT EXISTS (SELECT 1 FROM everysize_checkout_report r WHERE r.ORDERID = o.OXID AND r.KIND = :kind)
+               AND NOT EXISTS (SELECT 1 FROM everysize_checkout_report r WHERE r.ORDERID = o.OXID AND r.KIND IN (:fulfillment, :revocation))
              ORDER BY o.OXORDERNR",
-            [':shopId' => $this->shopId(), ':kind' => self::KIND_FULFILLMENT]
+            [':shopId' => $this->shopId(), ':fulfillment' => self::KIND_FULFILLMENT, ':revocation' => self::KIND_REVOCATION]
         );
     }
 
@@ -211,10 +214,11 @@ class OrderLinks
 
     /**
      * Orders whose cancellation before shipping (MERCHANT_DECLINE) was reported
-     * since $since, with no item left uncancelled, and that have no automatic
-     * refund yet — neither done nor given up. An everysize order has one
-     * product; an item the merchant added in OXID keeps the order from being
-     * refunded in full.
+     * since $since, with no item left uncancelled, and with no refund through
+     * everysize at all — automatic (done or given up) or from the tab. After
+     * a deliberate partial refund the rest is not paid out on top. An
+     * everysize order has one product; an item the merchant added in OXID
+     * keeps the order from being refunded in full.
      *
      * @return array<int, array{OXID: string, EVERYSIZE_ORDER_ID: string, OXORDERNR: string}>
      */
@@ -230,10 +234,7 @@ class OrderLinks
                AND r.KIND = :revocation AND r.REASON = :decline AND r.RESULT = :sent
                AND r.CREATED >= :since
                AND NOT EXISTS (SELECT 1 FROM oxorderarticles i WHERE i.OXORDERID = o.OXID AND i.OXSTORNO = 0)
-               AND NOT EXISTS (
-                   SELECT 1 FROM everysize_checkout_report a
-                   WHERE a.ORDERID = o.OXID AND a.KIND = :refund AND a.SKU = :auto
-               )
+               AND NOT EXISTS (SELECT 1 FROM everysize_checkout_report a WHERE a.ORDERID = o.OXID AND a.KIND = :refund)
              ORDER BY o.OXORDERNR",
             [
                 ':shopId' => $this->shopId(),
@@ -242,7 +243,6 @@ class OrderLinks
                 ':sent' => self::RESULT_SENT,
                 ':since' => $since,
                 ':refund' => self::KIND_REFUND,
-                ':auto' => self::AUTO_REFUND,
             ]
         );
     }

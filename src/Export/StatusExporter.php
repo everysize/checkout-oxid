@@ -13,7 +13,9 @@ use Everysize\Checkout\Settings;
  * Reports shipping, cancellations and returns from OXID to everysize.
  *
  * - Shipping date set in OXID ("Jetzt versenden") → fulfillment with the
- *   order's tracking code and the configured carrier.
+ *   order's tracking code and the configured carrier, also if the order was
+ *   cancelled since (shipped and cancelled within one interval: fulfillment
+ *   first, then RETOUR in the same run).
  * - Tracking code entered or corrected after that, within TRACKING_DAYS →
  *   the fulfillment once more with the new code. everysize takes a repeated
  *   fulfillment as an update of carrier and code; the customer gets no mail.
@@ -30,8 +32,10 @@ use Everysize\Checkout\Settings;
  * have that code yet (orders shipped with 1.0.0 have no remembered code).
  *
  * A cancellation before shipping (MERCHANT_DECLINE) is refunded in full
- * through everysize afterwards, unless switched off: nothing was shipped, so
- * the customer is owed everything. Returns are left to the merchant (goods
+ * through everysize afterwards, unless switched off or something was refunded
+ * through everysize already: nothing was shipped, so the customer is owed
+ * everything — but after a deliberate partial refund the rest is not paid
+ * out on top. Returns are left to the merchant (goods
  * first). The idempotency key is fixed per order, so a repeated run never
  * refunds twice; transport errors are retried, a refusal is recorded once.
  */

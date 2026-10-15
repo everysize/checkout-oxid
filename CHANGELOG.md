@@ -1,3 +1,9 @@
+# 1.2.0
+- Tab "everysize" reorganised: three titled sections – the everysize order as an info table, refunds through everysize with tiles (paid / refunded / open), refund list with column headings, labelled form and notice box, reports to everysize as a table (cancellation and return named separately, amounts with currency, empty values as "–")
+- Times in the tab and the protocol formatted the same way, in the shop's time zone
+- Shipping is reported also if the order was cancelled between "Jetzt versenden" and the next run: first shipping with tracking code, then the return (before: cancellation `MERCHANT_DECLINE`, the tracking code was lost)
+- Automatic refund after a cancellation before shipping only if nothing has been refunded through everysize yet (before, after a partial refund in the tab the rest was refunded automatically)
+
 # 1.1.3
 - Test environment: `EVERYSIZE_CHECKOUT_API_URL` accepts any `https://` address under `everysize.com` (no port or path) instead of a fixed list; the admin page then shows "test environment"
 - Documentation and comments revised

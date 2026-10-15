@@ -7,6 +7,7 @@ namespace Everysize\Checkout\Controller\Admin;
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\ApiUrl;
 use Everysize\Checkout\Api\Client;
+use Everysize\Checkout\Display;
 use Everysize\Checkout\Protocol;
 use Everysize\Checkout\Settings;
 use OxidEsales\Eshop\Application\Controller\Admin\AdminController;
@@ -63,7 +64,7 @@ class CheckoutAdminController extends AdminController
         $this->addTplParam('everysizeCarrier', $settings->getCarrier());
         $this->addTplParam('everysizeCarriers', Settings::CARRIERS);
         $this->addTplParam('everysizeAutoRefundDecline', $settings->isAutoRefundDecline());
-        $this->addTplParam('everysizeProtocol', $protocol->getEntries($page * self::PAGE_SIZE, self::PAGE_SIZE, $state));
+        $this->addTplParam('everysizeProtocol', $this->protocolRows($protocol->getEntries($page * self::PAGE_SIZE, self::PAGE_SIZE, $state)));
         $this->addTplParam('everysizeProtocolFilter', $filter);
         $this->addTplParam('everysizeProtocolPage', $page);
         $this->addTplParam('everysizeProtocolPages', max(1, (int) ceil($total / self::PAGE_SIZE)));
@@ -148,6 +149,23 @@ class CheckoutAdminController extends AdminController
         } catch (ApiException $e) {
             $this->message = ['type' => 'error', 'text' => $this->translate('EVERYSIZE_CHECKOUT_TEST_FAILED').' '.$e->getMessage()];
         }
+    }
+
+    /**
+     * Protocol entries with the time in the same format as the order tab.
+     *
+     * @param array<int, array{CREATED: string, TITLE: string, MESSAGE: string, STATE: string}> $entries
+     *
+     * @return array<int, array{CREATED: string, TITLE: string, MESSAGE: string, STATE: string}>
+     */
+    private function protocolRows(array $entries): array
+    {
+        $format = $this->translate('EVERYSIZE_CHECKOUT_DATETIME_FORMAT');
+        foreach ($entries as $i => $entry) {
+            $entries[$i]['CREATED'] = Display::dateTime((string) $entry['CREATED'], $format);
+        }
+
+        return $entries;
     }
 
     /**

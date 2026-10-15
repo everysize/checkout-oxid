@@ -187,6 +187,31 @@ final class StatusExporterTest extends TestCase
         self::assertSame([], $this->http->requests);
     }
 
+    public function testShippedAndCancelledInOneIntervalIsReportedAsShippingThenReturn(): void
+    {
+        $this->links->fulfillments = [['OXID' => 'o1', 'EVERYSIZE_ORDER_ID' => 'ABC123', 'OXORDERNR' => '37', 'OXTRACKCODE' => '0034']];
+        $this->links->revocations = [['ORDERID' => 'o1', 'EVERYSIZE_ORDER_ID' => 'ABC123', 'OXORDERNR' => '37', 'SKU' => 'SKU-42']];
+        $this->http->queue(200, '{"everysizeOrderId":"ABC123","status":"PROCESSING"}');
+        $this->http->queue(201, '');
+        $this->http->queue(200, '{"everysizeOrderId":"ABC123","status":"COMPLETED"}');
+        $this->http->queue(204, '');
+
+        $result = $this->export();
+
+        self::assertSame([], $result['errors']);
+        self::assertSame(1, $result['fulfillments']);
+        self::assertSame(1, $result['returns']);
+        self::assertSame(0, $result['revocations']);
+        self::assertStringEndsWith('/orders/ABC123/fulfillment', $this->http->requests[2]['url']);
+        self::assertSame('{"carrier":"DHL","trackingCode":["0034"]}', $this->http->requests[2]['body']);
+        self::assertStringContainsString('RETOUR', $this->http->requests[4]['body']);
+        self::assertSame([
+            ['o1', OrderLinks::KIND_FULFILLMENT, '', OrderLinks::RESULT_SENT],
+            ['o1', OrderLinks::KIND_TRACKING, '0034', OrderLinks::RESULT_SENT],
+            ['o1', OrderLinks::KIND_REVOCATION, 'SKU-42', OrderLinks::RESULT_SENT],
+        ], $this->links->reports);
+    }
+
     /**
      * @return array{fulfillments: int, trackingCodes: int, revocations: int, returns: int, autoRefunds: int, skipped: int, pending: int, errors: string[]}
      */
@@ -238,6 +263,9 @@ final class FakeOrderLinks extends OrderLinks
     public ?string $trackingSince = null;
 
     /** @var array<int, array<string, string>> */
+    public array $revocations = [];
+
+    /** @var array<int, array<string, string>> */
     public array $autoRefunds = [];
 
     public ?string $autoRefundSince = null;
@@ -259,7 +287,12 @@ final class FakeOrderLinks extends OrderLinks
 
     public function getPendingRevocations(): array
     {
-        return [];
+        return $this->revocations;
+    }
+
+    public function hasSentFulfillment(string $orderId): bool
+    {
+        return \in_array([$orderId, self::KIND_FULFILLMENT, '', self::RESULT_SENT], $this->reports, true);
     }
 
     public function getPendingAutoRefunds(string $since): array

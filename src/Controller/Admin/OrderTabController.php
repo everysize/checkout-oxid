@@ -6,6 +6,7 @@ namespace Everysize\Checkout\Controller\Admin;
 
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
+use Everysize\Checkout\Display;
 use Everysize\Checkout\OrderLinks;
 use Everysize\Checkout\RefundAmount;
 use Everysize\Checkout\Settings;
@@ -43,8 +44,12 @@ class OrderTabController extends AdminDetailsController
 
         $this->addTplParam('oxid', $orderId);
         $this->addTplParam('everysizeLink', $link);
-        $this->addTplParam('everysizeReports', $link !== null ? $links->getReports($orderId) : []);
         $this->addTplParam('everysizeMessage', $this->message);
+        if ($link !== null) {
+            $this->addTplParam('everysizeImported', $this->dateTime($link['CREATED']));
+            $this->addTplParam('everysizeNumberReported', $link['NUMBER_REPORTED'] !== null ? $this->dateTime($link['NUMBER_REPORTED']) : '');
+            $this->addTplParam('everysizeReports', $this->reportRows($links->getReports($orderId)));
+        }
 
         if ($link !== null && $link['PAYPAL_CAPTURE_ID'] !== '') {
             $this->addRefundParams($orderId, $link['EVERYSIZE_ORDER_ID']);
@@ -131,7 +136,7 @@ class OrderTabController extends AdminDetailsController
                     $refunded += $amount;
                 }
                 $refunds[] = [
-                    'created' => self::localTime((string) ($refund['created'] ?? '')),
+                    'created' => $this->dateTime((string) ($refund['created'] ?? '')),
                     'amount' => $this->formatAmount($amount),
                     'status' => $status,
                     'refundId' => (string) ($refund['refundId'] ?? ''),
@@ -146,7 +151,10 @@ class OrderTabController extends AdminDetailsController
         $this->addTplParam('everysizeRefundError', $refundError);
         $this->addTplParam('everysizePaid', $this->formatAmount($paid));
         $this->addTplParam('everysizeRefunded', $this->formatAmount($refunded));
-        $this->addTplParam('everysizeOpen', $refundError === '' ? $this->formatAmount($open) : '');
+        $this->addTplParam('everysizeOpen', $this->formatAmount($open));
+        $this->addTplParam('everysizeIsOpen', $open > 0);
+        // Pre-filled with what is still open; empty if the refunds could not be loaded (the open amount is unknown then).
+        $this->addTplParam('everysizeOpenInput', $refundError === '' ? Registry::getLang()->formatCurrency($open) : '');
         $this->addTplParam('everysizeCanRefund', $refundError !== '' || $open > 0);
         $this->addTplParam('everysizeRefundKey', bin2hex(random_bytes(16)));
         $this->addTplParam('everysizeAutoRefundDecline', $this->service(Settings::class)->isAutoRefundDecline());
@@ -164,16 +172,53 @@ class OrderTabController extends AdminDetailsController
         return $this->translate($ident).' ('.$e->getMessage().')';
     }
 
-    /** PayPal's ISO 8601 time (e.g. -07:00) as shop time "09.10.2026 15:27". */
-    private static function localTime(string $iso): string
+    /**
+     * The reports as table rows with plain labels: a revocation is a
+     * cancellation or a return by its reason, a refund's amount is shown as
+     * money, empty cells as "–".
+     *
+     * @param array<int, array{KIND: string, SKU: string, REASON: string, RESULT: string, CREATED: string}> $reports
+     *
+     * @return array<int, array{time: string, kind: string, subject: string, detail: string, result: string}>
+     */
+    private function reportRows(array $reports): array
     {
-        try {
-            return $iso === '' ? '' : (new \DateTimeImmutable($iso))
-                ->setTimezone(new \DateTimeZone(date_default_timezone_get()))
-                ->format('d.m.Y H:i');
-        } catch (\Exception $e) {
-            return $iso;
+        $rows = [];
+        foreach ($reports as $report) {
+            $kind = (string) $report['KIND'];
+            $sku = (string) $report['SKU'];
+            $reason = (string) $report['REASON'];
+            $result = (string) $report['RESULT'];
+
+            $kindIdent = 'EVERYSIZE_CHECKOUT_REPORT_'.$kind;
+            if ($kind === OrderLinks::KIND_REVOCATION) {
+                $kindIdent .= $reason === Client::REASON_RETOUR ? '_RETOUR' : '_DECLINE';
+            }
+            $subject = $kind === OrderLinks::KIND_REFUND && $sku === OrderLinks::AUTO_REFUND
+                ? $this->translate('EVERYSIZE_CHECKOUT_REPORT_AUTO_REFUND')
+                : $sku;
+            // A refund from the tab stores its amount as reason; the automatic one the refund ID or why it was not done.
+            $detail = $kind === OrderLinks::KIND_REFUND && is_numeric($reason) ? $this->formatAmount((float) $reason) : $reason;
+            $resultIdent = $kind === OrderLinks::KIND_REFUND && $result !== OrderLinks::RESULT_SENT
+                ? 'EVERYSIZE_CHECKOUT_RESULT_REFUND_'.$result
+                : 'EVERYSIZE_CHECKOUT_RESULT_'.$result;
+
+            $rows[] = [
+                'time' => $this->dateTime((string) $report['CREATED']),
+                'kind' => $this->translate($kindIdent),
+                'subject' => $subject !== '' ? $subject : '–',
+                'detail' => $detail !== '' ? $detail : '–',
+                'result' => $this->translate($resultIdent),
+            ];
         }
+
+        return $rows;
+    }
+
+    /** Stored time or PayPal's ISO 8601 time as shop time, e.g. "09.10.2026 15:27". */
+    private function dateTime(string $value): string
+    {
+        return Display::dateTime($value, $this->translate('EVERYSIZE_CHECKOUT_DATETIME_FORMAT'));
     }
 
     private function formatAmount(float $amount): string
