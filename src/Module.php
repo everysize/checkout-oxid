@@ -7,7 +7,7 @@ namespace Everysize\Checkout;
 final class Module
 {
     public const ID = 'everysize_checkout';
-    public const VERSION = '1.2.0';
+    public const VERSION = '1.3.0';
 
     /** Payment method the imported orders carry; created on activation, not offered in the storefront. */
     public const PAYMENT_ID = 'everysize_checkout';

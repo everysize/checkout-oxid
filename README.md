@@ -25,6 +25,7 @@ PayPal-Konto des Händlers.
 |---|---|---|
 | everysize → Shop | neue Bestellungen (`PROCESSING`, auch bereits stornierte `REVOKED`) ohne Händler-Bestellnummer | jeder Lauf |
 | Shop → everysize | OXID-Bestellnummer | direkt nach dem Import |
+| Shop → everysize | Import-Meldung: aktueller Shop-Preis und Bestand je Position (Information, ab 1.3.0) | einmal direkt nach dem Import, nicht bei stornierten Bestellungen |
 | Shop → everysize | Versand mit Sendungsnummer und Versanddienstleister | Versanddatum gesetzt („Jetzt versenden“), auch wenn die Bestellung inzwischen storniert ist |
 | Shop → everysize | Sendungsnummer nachgetragen oder korrigiert | bis 14 Tage nach der Versandmeldung, nur wenn everysize sie noch nicht hat |
 | Shop → everysize | Erstattung (ganz oder teilweise) | Button im Reiter „everysize“ |
@@ -38,6 +39,13 @@ PayPal-Konto des Händlers.
 * **Preise:** Bestellung mit den bei everysize bezahlten Bruttopreisen.
   Netto und Mehrwertsteuer rechnet das Modul mit dem Steuersatz aus OXID
   zurück (Artikel → Kategorie → Standard).
+* **Import-Meldung:** Vor dem Schreiben liest das Modul je Position den
+  Brutto-Shop-Preis (nur in Euro und nur, wenn OXID ihn als Brutto liefert)
+  und den Bestand (nur wenn der Shop den Verkauf über den Bestand begrenzt). Weicht der Preis um mehr als 0,009 ab oder liegt der
+  Bestand unter der Bestellmenge, steht eine Warnung im Protokoll; der Lauf
+  bleibt erfolgreich. Die Meldung an everysize ist reine Information: sie
+  ändert weder Bestellung noch Preis, ein Fehler dabei stoppt den Import
+  nicht und wird nicht wiederholt.
 * **Bestand:** wird beim Import reduziert, ein Storno in OXID bucht ihn wie
   gewohnt zurück.
 * **Kunde:** `customer.email` ist eine Weiterleitungsadresse von everysize,
@@ -80,22 +88,45 @@ PayPal-Konto des Händlers.
   Betrag) → „Erstatten“. everysize erstattet die PayPal-Zahlung im Namen des
   Händlers (External API `POST …/orders/{id}/refunds`); jedes Formular trägt
   einen eigenen `Idempotency-Key`, ein doppelt abgeschicktes Formular erstattet
-  einmal.
+  einmal. Nur eine klare Ablehnung der Erstattungsanfrage selbst gilt als „kein Geld
+  geflossen“. Bei jeder anderen Antwort (Timeout, Serverfehler, auch 401/403/404/429) und bei einer
+  Antwort ohne Refund-ID meldet der Reiter „Ergebnis unklar“: Das Geld kann ausgezahlt worden sein.
+  Bitte in PayPal prüfen. Solange der Fall offen ist, geht keine andere Erstattung raus (auch keine
+  automatische), und innerhalb von 2,5 Minuten nach dem Senden wird nichts wiederholt. „Wiederholen“
+  liest zuerst die Erstattungen bei PayPal: steht dort eine seit dem Anlegen neue, passende
+  Erstattung, die der Shop nicht kennt, wird sie als Erfolg gebucht und nichts gesendet; ist die Liste
+  nicht lesbar, wird nichts gesendet. Sonst gilt: Ging die erste Anfrage nicht durch, wird der Betrag
+  jetzt ausgezahlt. Lehnt der Checkout die Wiederholung ab, bleibt der Fall offen. „Als geklärt
+  markieren“ sendet nichts und beendet den Fall (frühestens 2,5 Minuten nach dem Senden); die
+  automatische Erstattung bleibt dann für diese Bestellung aus. „Bezahlt“ ist der Betrag, den
+  everysize abgebucht hat; ein Positionsstorno in OXID ändert ihn nicht.
 * **Automatische Erstattung:** Nach einem gemeldeten Storno **vor** dem Versand
   (`MERCHANT_DECLINE`) erstattet das Modul im nächsten Lauf den vollen Betrag,
   sobald keine Position der Bestellung mehr aktiv ist (eine everysize-Bestellung
   hat ein Produkt; ein im Admin hinzugefügter Artikel verhindert die Erstattung)
-  — es wurde nichts versendet, der Kundin steht alles zu. Nur, wenn über
+  — es wurde nichts versendet, der Kundin steht alles zu. Nur, wenn nichts auf
+  einen Versand hindeutet (Versanddatum, Sendungsnummer), im Shop kein Rabatt oder Gutschein
+  gegeben wurde (auch nicht vor einem Positionsstorno: OXID setzt beide Felder bei der Neuberechnung
+  zurück, das Modul hält den Rabatt vorher als Sperre fest), der gezahlte Betrag bei everysize lesbar ist, und über
   everysize noch **gar nichts** erstattet wurde (weder automatisch noch im
   Reiter): nach einer bewussten Teilerstattung wird der Rest nicht obendrauf
   gezahlt. Retouren nicht (der
   Händler erstattet nach Wareneingang, ggf. mit Abzug). Standard: an
   (Einstellung „Storno vor dem Versand automatisch erstatten“); erstattet
   werden nur Stornos ab dem Einschalten (`autoRefundSince`, beim Update per
-  Migration gesetzt), höchstens 14 Tage zurück. Fester `Idempotency-Key`
-  `auto-decline-<everysize-ID>` je Bestellung; Verbindungs- und Serverfehler
-  versucht der nächste Lauf erneut, eine Ablehnung (nicht erstattbar, PayPal
-  lehnt ab) steht einmal im Protokoll und im Reiter.
+  Migration gesetzt), höchstens 14 Tage zurück; Stornos, die die Automatik übergeht (vor dem
+  Einschaltdatum, mit noch aktiver Position), stehen einmal im Protokoll. Fester `Idempotency-Key`
+  `auto-decline-<everysize-ID>` je Bestellung. Die Automatik sendet höchstens einmal: unmittelbar vor
+  dem Senden fragt das Modul Einstellung und alle Bedingungen für genau diese Bestellung neu und liest
+  die Erstattungsliste bei everysize. Ist sie nicht lesbar, wird nichts gesendet und im nächsten Lauf
+  erneut geprüft; steht dort eine abgeschlossene oder ausstehende Erstattung (auch in PayPal gemacht),
+  erstattet das Modul nicht. Bleibt das Ergebnis unklar (Verbindungs- oder Serverfehler), wird der Fall
+  nie automatisch wiederholt: spätere Läufe lesen nur die Liste und schließen den Fall bei einer neuen
+  passenden Erstattung ab, nach 15 Minuten steht er in jedem Lauf im Protokoll; wiederholt wird im
+  Reiter. Eine Ablehnung (nicht erstattbar, PayPal lehnt ab) und jede Sperre stehen einmal im Protokoll
+  und im Reiter. **Grenze:** Eine Gutschrift, die nur im Shop gebucht wird, erkennt das Modul nicht
+  (außer über die genannten Indizien Versanddatum, Sendungsnummer, Rabatt und Gutschein). Erstatten Sie
+  vor dem Storno selbst oder schalten Sie die Automatik ab.
 * **Bestellliste:** Spalte „everysize“ (vor den Storno-/Löschen-Symbolen) mit der everysize-Bestellnummer,
   in der Filterzeile „alle / nur everysize / ohne everysize“ und die Suche
   nach der everysize-Nummer (Erweiterung von `OrderList` und
@@ -150,7 +181,10 @@ Quellen ersetzen), `vendor/bin/oe-console oe:module:install vendor/everysize/che
 dann Modul **deaktivieren und wieder aktivieren**
 (`oe:module:deactivate` / `oe:module:activate everysize_checkout`): das
 führt die Migrationen aus und übernimmt neue Klassenerweiterungen (ab 1.1.0
-die Bestellliste). Deaktivieren löscht keine Daten.
+die Bestellliste, in dieser Fassung das Bestellmodell). Alle drei Schritte sind nötig:
+Bis sie gemacht sind, läuft die automatische Erstattung nicht und meldet das im Protokoll,
+und der Reiter „everysize“ zeigt „Datenbank-Update nötig“ ohne Erstattungsformulare.
+Deaktivieren löscht keine Daten.
 
 ## Einrichtung
 

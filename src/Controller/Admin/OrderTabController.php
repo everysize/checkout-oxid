@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace Everysize\Checkout\Controller\Admin;
 
+use Everysize\Checkout\Api\Amount;
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
 use Everysize\Checkout\Display;
+use Everysize\Checkout\ManualRefund;
 use Everysize\Checkout\OrderLinks;
-use Everysize\Checkout\RefundAmount;
+use Everysize\Checkout\Protocol;
 use Everysize\Checkout\Settings;
 use OxidEsales\Eshop\Application\Controller\Admin\AdminDetailsController;
-use OxidEsales\Eshop\Application\Model\Order;
 use OxidEsales\Eshop\Core\Registry;
 use OxidEsales\EshopCommunity\Internal\Container\ContainerFactory;
 
@@ -52,7 +53,15 @@ class OrderTabController extends AdminDetailsController
         }
 
         if ($link !== null && $link['PAYPAL_CAPTURE_ID'] !== '') {
-            $this->addRefundParams($orderId, $link['EVERYSIZE_ORDER_ID']);
+            try {
+                $this->addRefundParams($orderId, $link['EVERYSIZE_ORDER_ID']);
+            } catch (\Throwable $e) {
+                // E.g. the module update is not finished (table missing): a notice instead of a broken tab, no forms.
+                $this->addTplParam('everysizeRefunds', []);
+                $this->addTplParam('everysizeRefundError', $this->translate('EVERYSIZE_CHECKOUT_SCHEMA_UPDATE_NEEDED').' '.$e->getMessage());
+                $this->addTplParam('everysizeCanRefund', false);
+                $this->addTplParam('everysizeUnclear', false);
+            }
         }
 
         return $this->_sThisTemplate;
@@ -66,6 +75,9 @@ class OrderTabController extends AdminDetailsController
             return;
         }
 
+        // The checkout waits up to 60 s for PayPal, the API call up to 100 s.
+        @set_time_limit(180);
+
         $orderId = (string) $this->getEditObjectId();
         $links = $this->service(OrderLinks::class);
         $link = $links->getLink($orderId);
@@ -75,62 +87,117 @@ class OrderTabController extends AdminDetailsController
             return;
         }
 
+        // The rules (only a clear refusal counts, the open entry, repeating reads the PayPal list first, stale tab,
+        // no refund of the rest from an empty field) live in ManualRefund; this method shows the outcome.
         $request = Registry::getRequest();
-        $amount = RefundAmount::normalize((string) $request->getRequestParameter('everysize_refund_amount'));
-        $key = (string) $request->getRequestParameter('everysize_refund_key');
-        if ($amount === null) {
-            $this->error('EVERYSIZE_CHECKOUT_REFUND_ERROR_AMOUNT');
+        $known = (string) $request->getRequestParameter('everysize_known_refunded');
+        $result = (new ManualRefund($this->service(Client::class), $links))->refund(
+            $orderId,
+            $link['EVERYSIZE_ORDER_ID'],
+            (string) $request->getRequestParameter('everysize_refund_amount'),
+            (string) $request->getRequestParameter('everysize_refund_repeat') === '1',
+            (string) $request->getRequestParameter('everysize_refund_key'),
+            preg_match('/^\d+(\.\d{1,2})?$/', $known) === 1 ? $known : null
+        );
 
-            return;
+        switch ($result['outcome']) {
+            case ManualRefund::DONE:
+            case ManualRefund::FOUND:
+                // The amount of the refund itself: a repeated "rest" has no amount of its own.
+                $paid = (string) ($result['refund']['amount'] ?? $result['amount']);
+                $this->message = ['type' => 'ok', 'text' => sprintf(
+                    $this->translate($result['outcome'] === ManualRefund::FOUND ? 'EVERYSIZE_CHECKOUT_REFUND_FOUND' : 'EVERYSIZE_CHECKOUT_REFUND_OK'),
+                    $this->formatAmount((float) $paid),
+                    (string) ($result['refund']['status'] ?? '')
+                )];
+                break;
+            case ManualRefund::ALREADY_REFUNDED:
+                // everysize answers a capture that is refunded completely already with 201 and this status, no refund ID.
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_ALREADY');
+                break;
+            case ManualRefund::INVALID_AMOUNT:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_ERROR_AMOUNT');
+                break;
+            case ManualRefund::OTHER_AMOUNT:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_UNCLEAR_OTHER_AMOUNT');
+                break;
+            case ManualRefund::NOTHING_OPEN:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_NOTHING_OPEN');
+                break;
+            case ManualRefund::RUNNING:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_RUNNING');
+                break;
+            case ManualRefund::STALE:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_STALE');
+                break;
+            case ManualRefund::LIST_UNREADABLE:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_LIST_UNREADABLE');
+                break;
+            case ManualRefund::REJECTED_REPEAT:
+                $this->message = ['type' => 'error', 'text' => $this->translate('EVERYSIZE_CHECKOUT_REFUND_REJECTED_REPEAT').' '.$result['message']];
+                break;
+            case ManualRefund::NOT_SENT:
+                $this->message = ['type' => 'error', 'text' => $this->translate('EVERYSIZE_CHECKOUT_REFUND_NOT_SENT').' '.$result['message']];
+                break;
+            case ManualRefund::REJECTED:
+                $this->message = ['type' => 'error', 'text' => $this->refundError($result['reason'], $result['message'])];
+                break;
+            default: // ManualRefund::UNCLEAR
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_UNCLEAR');
         }
-        if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $key)) {
+    }
+
+    /** "Mark as settled": sends nothing, ends the open refund for good (not before 150 s). */
+    public function settle(): void
+    {
+        if (!Registry::getSession()->checkSessionChallenge()) {
             $this->error('EVERYSIZE_CHECKOUT_ERROR_SESSION');
 
             return;
         }
 
-        try {
-            $refund = $this->service(Client::class)->refund($link['EVERYSIZE_ORDER_ID'], $amount, $key);
-        } catch (ApiException $e) {
-            $this->message = ['type' => 'error', 'text' => $this->refundError($e)];
+        $orderId = (string) $this->getEditObjectId();
+        $links = $this->service(OrderLinks::class);
+        if ($links->getLink($orderId) === null) {
+            $this->error('EVERYSIZE_CHECKOUT_REFUND_NOT_POSSIBLE');
 
             return;
         }
 
-        // everysize answers a capture that is refunded completely already with 201 and this status, no refund ID.
-        if (strtoupper((string) ($refund['status'] ?? '')) === 'ALREADY_REFUNDED') {
-            $this->error('EVERYSIZE_CHECKOUT_REFUND_ALREADY');
-
-            return;
+        $result = (new ManualRefund($this->service(Client::class), $links))->markSettled($orderId, (string) Registry::getRequest()->getRequestParameter('everysize_settle_key'));
+        switch ($result['outcome']) {
+            case ManualRefund::SETTLED:
+                $this->service(Protocol::class)->add(
+                    'Refund marked as settled',
+                    sprintf('Order %s: the open refund with an unclear result was marked as settled by the merchant, nothing was sent. The automatic refund stays off for this order.', $orderId),
+                    true
+                );
+                $this->message = ['type' => 'ok', 'text' => $this->translate('EVERYSIZE_CHECKOUT_REFUND_SETTLED_OK')];
+                break;
+            case ManualRefund::RUNNING:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_RUNNING');
+                break;
+            case ManualRefund::NOTHING_OPEN:
+                $this->error('EVERYSIZE_CHECKOUT_REFUND_NOTHING_OPEN');
+                break;
+            default:
+                $this->message = ['type' => 'error', 'text' => $this->translate('EVERYSIZE_CHECKOUT_REFUND_NOT_SENT').' '.$result['message']];
         }
-
-        $refundId = (string) ($refund['refundId'] ?? '');
-        $reference = $refundId !== '' ? $refundId : $key;
-        // The same idempotency key again (form sent twice) returns the same refund: record and announce it once.
-        if (\in_array($reference, array_column($links->getReports($orderId), 'SKU'), true)) {
-            $this->message = ['type' => 'ok', 'text' => $this->translate('EVERYSIZE_CHECKOUT_REFUND_DUPLICATE')];
-
-            return;
-        }
-        $links->addReport($orderId, OrderLinks::KIND_REFUND, $reference, $amount, OrderLinks::RESULT_SENT);
-        $this->message = ['type' => 'ok', 'text' => sprintf(
-            $this->translate('EVERYSIZE_CHECKOUT_REFUND_OK'),
-            $this->formatAmount((float) $amount),
-            (string) ($refund['status'] ?? '')
-        )];
     }
 
     private function addRefundParams(string $orderId, string $everysizeOrderId): void
     {
-        $order = oxNew(Order::class);
-        $paid = $order->load($orderId) ? (float) $order->getTotalOrderSum() : 0.0;
-
+        // "Paid" is what everysize charged (grossPrice): the shop's own total drops when a position is cancelled
+        // (recalculateOrder), which would hide the open amount and the form.
+        $paid = 0.0;
         $refunds = [];
         $refunded = 0.0;
         $refundError = '';
         try {
-            foreach ($this->service(Client::class)->getRefunds($everysizeOrderId) as $refund) {
-                $amount = (float) str_replace(',', '', (string) ($refund['amount'] ?? '0'));
+            $client = $this->service(Client::class);
+            $paid = Amount::parse($client->getOrder($everysizeOrderId)['grossPrice'] ?? null, 'grossPrice');
+            foreach ($client->getRefunds($everysizeOrderId) as $refund) {
+                $amount = Amount::parse($refund['amount'] ?? '0', 'refund amount');
                 $status = strtoupper((string) ($refund['status'] ?? ''));
                 if (\in_array($status, self::REFUNDED_STATES, true)) {
                     $refunded += $amount;
@@ -155,21 +222,35 @@ class OrderTabController extends AdminDetailsController
         $this->addTplParam('everysizeIsOpen', $open > 0);
         // Pre-filled with what is still open; empty if the refunds could not be loaded (the open amount is unknown then).
         $this->addTplParam('everysizeOpenInput', $refundError === '' ? Registry::getLang()->formatCurrency($open) : '');
-        $this->addTplParam('everysizeCanRefund', $refundError !== '' || $open > 0);
+        $unclear = $this->service(OrderLinks::class)->getOpenRefund($orderId);
+        // A refund with an unknown outcome blocks every other one: only repeating it (same key, same amount) is offered.
+        // Not with an unreadable list: the form's check against the PayPal list would refuse it anyway.
+        $this->addTplParam('everysizeCanRefund', $unclear === null && $refundError === '' && $open > 0);
+        $this->addTplParam('everysizeKnownRefunded', number_format(round($refunded, 2), 2, '.', ''));
+        $this->addTplParam('everysizeUnclear', $unclear !== null);
+        if ($unclear !== null) {
+            $what = $unclear['amount'] !== '' ? $this->formatAmount((float) $unclear['amount']) : $this->translate('EVERYSIZE_CHECKOUT_REFUND_REST');
+            $running = ($time = strtotime($unclear['sent'] ?? $unclear['created'])) !== false && time() - $time < ManualRefund::MIN_AGE;
+            $this->addTplParam('everysizeUnclearText', sprintf($this->translate('EVERYSIZE_CHECKOUT_REFUND_UNCLEAR_TEXT'), $what, $this->dateTime($unclear['created']))
+                .($running ? ' '.$this->translate('EVERYSIZE_CHECKOUT_REFUND_RUNNING') : ''));
+            $this->addTplParam('everysizeUnclearKey', $unclear['key']);
+            $this->addTplParam('everysizeUnclearButton', sprintf($this->translate('EVERYSIZE_CHECKOUT_REFUND_REPEAT_BUTTON'), $what));
+            $this->addTplParam('everysizeUnclearConfirm', sprintf($this->translate('EVERYSIZE_CHECKOUT_REFUND_REPEAT_CONFIRM'), $what));
+        }
         $this->addTplParam('everysizeRefundKey', bin2hex(random_bytes(16)));
         $this->addTplParam('everysizeAutoRefundDecline', $this->service(Settings::class)->isAutoRefundDecline());
     }
 
     /** Known problem reasons of the refund endpoint in plain words, the API's own text behind it. */
-    private function refundError(ApiException $e): string
+    private function refundError(string $reason, string $message): string
     {
         $ident = [
             'ORDER_NOT_PAID_USING_EVERYSIZE_CHECKOUT_PAYMENTS' => 'EVERYSIZE_CHECKOUT_REFUND_NOT_POSSIBLE',
             'REFUND_AMOUNT_INVALID' => 'EVERYSIZE_CHECKOUT_REFUND_AMOUNT_REJECTED',
             'PAYPAL_REFUND_FAILED' => 'EVERYSIZE_CHECKOUT_REFUND_PAYPAL_REJECTED',
-        ][$e->getReason()] ?? 'EVERYSIZE_CHECKOUT_REFUND_FAILED';
+        ][$reason] ?? 'EVERYSIZE_CHECKOUT_REFUND_FAILED';
 
-        return $this->translate($ident).' ('.$e->getMessage().')';
+        return $this->translate($ident).' ('.$message.')';
     }
 
     /**
@@ -197,6 +278,9 @@ class OrderTabController extends AdminDetailsController
             $subject = $kind === OrderLinks::KIND_REFUND && $sku === OrderLinks::AUTO_REFUND
                 ? $this->translate('EVERYSIZE_CHECKOUT_REPORT_AUTO_REFUND')
                 : $sku;
+            if ($kind === OrderLinks::KIND_REFUND && strpos($sku, 'settled-') === 0) {
+                $subject = '';
+            }
             // A refund from the tab stores its amount as reason; the automatic one the refund ID or why it was not done.
             $detail = $kind === OrderLinks::KIND_REFUND && is_numeric($reason) ? $this->formatAmount((float) $reason) : $reason;
             $resultIdent = $kind === OrderLinks::KIND_REFUND && $result !== OrderLinks::RESULT_SENT

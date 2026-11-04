@@ -44,7 +44,7 @@ class OrderImporter
     /**
      * @param array<string, mixed> $esOrder order as returned by the everysize API
      *
-     * @return array{orderId: string, orderNumber: string, warnings: string[]}
+     * @return array{orderId: string, orderNumber: string, warnings: string[], report: array<int, array{sku: string, shopPrice: ?string, stock: ?int}>}
      */
     public function import(array $esOrder): array
     {
@@ -76,6 +76,16 @@ class OrderImporter
                     $prices['totalOrderSum'],
                     $everysizeTotal
                 );
+            }
+        }
+
+        // Before anything is written: the import reduces the stock.
+        $report = [];
+        if (ImportReport::isReportable((string) ($esOrder['status'] ?? ''))) {
+            foreach ($lines as $line) {
+                $entry = $this->readShop($line['article'], $line['sku']);
+                $report[] = $entry;
+                array_push($warnings, ...ImportReport::warnings($everysizeOrderId, $entry, $line['gross'], $line['quantity']));
             }
         }
 
@@ -137,7 +147,70 @@ class OrderImporter
             throw $e;
         }
 
-        return ['orderId' => $orderId, 'orderNumber' => $orderNumber, 'warnings' => $warnings];
+        return ['orderId' => $orderId, 'orderNumber' => $orderNumber, 'warnings' => $warnings, 'report' => $report];
+    }
+
+    /**
+     * What the shop has for the article right now: gross price a customer
+     * would pay and stock, the latter only if the shop limits sales by stock
+     * (blUseStock and OXSTOCKFLAG 2 or 3, or 1 and 4 with basket
+     * reservations on and negative stock off). Never throws; unknown is null,
+     * also for a price the shop keeps net or in a currency other than euro.
+     *
+     * @return array{sku: string, shopPrice: ?string, stock: ?int}
+     */
+    private function readShop(Article $article, string $sku): array
+    {
+        $price = null;
+        $stock = null;
+        try {
+            $config = Registry::getConfig();
+            // The first configured currency is the default one; the price
+            // object is calculated in the active currency (the default one
+            // in the sync), which must be euro as well.
+            $currencies = $config->getCurrencyArray();
+            $default = $this->currencyName(reset($currencies));
+            if (ImportReport::priceIsGrossEuro(
+                (bool) $config->getConfigParam('blShowNetPrice'),
+                (bool) $config->getConfigParam('bl_perfCalcVatOnlyForBasketOrder'),
+                $default
+            ) && $this->currencyName($config->getActShopCurrencyObject()) === $default) {
+                $priceObject = $article->getPrice();
+                $price = $priceObject !== null ? (float) $priceObject->getBruttoPrice() : null;
+            }
+        } catch (\Throwable $e) {
+            $price = null;
+        }
+        try {
+            if (Registry::getConfig()->getConfigParam('blUseStock')) {
+                $row = DatabaseProvider::getDb(DatabaseProvider::FETCH_MODE_ASSOC)->getRow(
+                    'SELECT OXSTOCK, OXSTOCKFLAG FROM oxarticles WHERE OXID = :id',
+                    [':id' => $article->getId()]
+                );
+                if (\is_array($row) && $row !== []) {
+                    $stock = ImportReport::stock(
+                        (int) $row['OXSTOCKFLAG'],
+                        (float) $row['OXSTOCK'],
+                        (bool) Registry::getConfig()->getConfigParam('blPsBasketReservationEnabled'),
+                        (bool) Registry::getConfig()->getConfigParam('blAllowNegativeStock')
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            $stock = null;
+        }
+
+        return ImportReport::entry($sku, $price, $stock);
+    }
+
+    /**
+     * @param mixed $currency a currency object of the shop config (->name)
+     */
+    private function currencyName($currency): ?string
+    {
+        $name = \is_object($currency) && isset($currency->name) ? trim((string) $currency->name) : '';
+
+        return $name === '' ? null : strtoupper($name);
     }
 
     /**

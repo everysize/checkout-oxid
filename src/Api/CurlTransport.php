@@ -9,7 +9,7 @@ final class CurlTransport implements HttpTransport
     private const CONNECT_TIMEOUT = 10;
     private const TIMEOUT = 30;
 
-    public function request(string $method, string $url, array $headers, ?string $body = null): array
+    public function request(string $method, string $url, array $headers, ?string $body = null, int $timeout = 0): array
     {
         $ch = curl_init($url);
         $options = [
@@ -17,7 +17,7 @@ final class CurlTransport implements HttpTransport
             \CURLOPT_CUSTOMREQUEST => $method,
             \CURLOPT_HTTPHEADER => $headers,
             \CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
-            \CURLOPT_TIMEOUT => self::TIMEOUT,
+            \CURLOPT_TIMEOUT => $timeout > 0 ? $timeout : self::TIMEOUT,
             \CURLOPT_FOLLOWLOCATION => false,
         ];
         if ($body !== null) {

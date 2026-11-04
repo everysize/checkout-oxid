@@ -29,9 +29,20 @@ class Client
     private const ENDPOINT_ORDERS = '/api/v1/shops/%d/orders?status=PROCESSING,REVOKING,REVOKED&acknowledged=false&pageNumber=0&pageSize=%d';
     private const ENDPOINT_ORDER = '/api/v1/shops/%d/orders/%s';
     private const ENDPOINT_ORDER_NUMBER = '/api/v1/shops/%d/orders/%s/merchant-order-number';
+    private const ENDPOINT_IMPORT_REPORT = '/api/v1/shops/%d/orders/%s/import-report';
     private const ENDPOINT_FULFILLMENT = '/api/v1/shops/%d/orders/%s/fulfillment';
     private const ENDPOINT_REVOCATION = '/api/v1/shops/%d/orders/%s/revocations';
     private const ENDPOINT_REFUNDS = '/api/v1/shops/%d/orders/%s/refunds';
+
+    /** Pattern of the Idempotency-Key header the checkout accepts. */
+    private const IDEMPOTENCY_KEY_PATTERN = '/^[A-Za-z0-9_-]{1,64}$/';
+
+    /**
+     * Total timeout of a refund call in seconds: the checkout waits up to 60 s
+     * for PayPal and reads the order afterwards, so a shorter timeout gives up
+     * on a refund that is still being booked.
+     */
+    public const REFUND_TIMEOUT = 100;
 
     /** Renew the token this many seconds before it expires. */
     private const TOKEN_MARGIN = 60;
@@ -154,6 +165,26 @@ class Client
     }
 
     /**
+     * Tells everysize what the shop had for one position when the order was
+     * imported. Informational: the order stays as it is whatever happens.
+     *
+     * @param string|null $shopPrice current gross price, "109.95", null = unknown
+     * @param int|null    $stock     stock before the import, null = unknown or not limited
+     */
+    public function sendImportReport(string $everysizeOrderId, string $sku, ?string $shopPrice, ?int $stock): void
+    {
+        $response = $this->call(
+            'POST',
+            sprintf(self::ENDPOINT_IMPORT_REPORT, $this->getShopId(), rawurlencode($everysizeOrderId)),
+            ['sku' => $sku, 'shopPrice' => $shopPrice, 'stock' => $stock]
+        );
+
+        if ($response['status'] !== 204) {
+            throw $this->error(sprintf('Import report for %s', $everysizeOrderId), $response);
+        }
+    }
+
+    /**
      * Marks the order as shipped. everysize only stores carrier and tracking
      * code if both are given.
      */
@@ -174,7 +205,10 @@ class Client
     /**
      * Refunds the customer through everysize (PayPal, on the merchant's behalf).
      * The idempotency key makes a repeated request (double click, timeout and
-     * retry) refund only once.
+     * retry) refund only once, but only together with the same amount: a key
+     * belongs to exactly one amount (the checkout answers 422 otherwise).
+     * Success is any 2xx; status 0 and 5xx leave the result unclear
+     * (ApiException::isOutcomeUnclear()).
      *
      * @param string|null $amount "10.00", null = everything not refunded yet
      *
@@ -182,19 +216,36 @@ class Client
      */
     public function refund(string $everysizeOrderId, ?string $amount, string $idempotencyKey): array
     {
+        if (!self::isValidIdempotencyKey($idempotencyKey)) {
+            throw new \InvalidArgumentException('The idempotency key must match [A-Za-z0-9_-]{1,64}');
+        }
+
+        // The token call is not the refund POST: a failure here proves that nothing was sent.
+        try {
+            $this->authenticate();
+        } catch (ApiException $e) {
+            throw new ApiException($e->getMessage(), $e->getStatus(), $e->getReason(), true);
+        }
+
         $body = $amount === null ? new \stdClass() : ['amount' => $amount];
         $response = $this->call(
             'POST',
             sprintf(self::ENDPOINT_REFUNDS, $this->getShopId(), rawurlencode($everysizeOrderId)),
             $body,
-            ['Idempotency-Key: '.$idempotencyKey]
+            ['Idempotency-Key: '.$idempotencyKey],
+            self::REFUND_TIMEOUT
         );
         $data = $this->decode($response['body']);
-        if ($response['status'] !== 201) {
+        if ($response['status'] < 200 || $response['status'] > 299) {
             throw $this->error(sprintf('Refund for %s', $everysizeOrderId), $response);
         }
 
         return $data;
+    }
+
+    public static function isValidIdempotencyKey(string $key): bool
+    {
+        return preg_match(self::IDEMPOTENCY_KEY_PATTERN, $key) === 1;
     }
 
     /**
@@ -204,11 +255,28 @@ class Client
     {
         $response = $this->call('GET', sprintf(self::ENDPOINT_REFUNDS, $this->getShopId(), rawurlencode($everysizeOrderId)));
         $data = json_decode($response['body'], true);
-        if ($response['status'] !== 200 || !\is_array($data)) {
+        // Only a real list counts (a JSON array, not an object), and each entry has a refund ID and a status.
+        $isList = $response['status'] === 200 && \is_array($data) && strpos(ltrim($response['body']), '[') === 0;
+        if ($isList) {
+            foreach ($data as $refund) {
+                if (!\is_array($refund) || !isset($refund['refundId'], $refund['status']) || !\is_string($refund['refundId']) || !\is_string($refund['status']) || $refund['refundId'] === '') {
+                    $isList = false;
+                    break;
+                }
+                // A refund that counts (COMPLETED, PENDING) needs an amount as PayPal writes it: dot, no thousands
+                // separator. Without one it would count as 0 and the automatic refund would pay out the rest.
+                if (\in_array(strtoupper($refund['status']), ['COMPLETED', 'PENDING'], true)
+                    && (!isset($refund['amount']) || !\is_string($refund['amount']) || preg_match('/^\d+(\.\d+)?$/', $refund['amount']) !== 1)) {
+                    $isList = false;
+                    break;
+                }
+            }
+        }
+        if (!$isList) {
             throw $this->error(sprintf('Refunds of %s', $everysizeOrderId), $response);
         }
 
-        return array_values(array_filter($data, '\is_array'));
+        return array_values($data);
     }
 
     public function sendRevocation(string $everysizeOrderId, string $sku, string $reason, string $comment = ''): void
@@ -244,11 +312,12 @@ class Client
 
     /**
      * @param array<string, mixed>|\stdClass|null $payload
-     * @param string[]                             $extraHeaders
+     * @param string[]                            $extraHeaders
+     * @param int                                 $timeout      total seconds, 0 = transport default
      *
      * @return array{status: int, body: string}
      */
-    private function call(string $method, string $path, $payload = null, array $extraHeaders = []): array
+    private function call(string $method, string $path, $payload = null, array $extraHeaders = [], int $timeout = 0): array
     {
         $this->authenticate();
 
@@ -259,7 +328,7 @@ class Client
             $headers[] = 'Content-Type: application/json';
         }
 
-        return $this->http->request($method, $this->getApiUrl().$path, $this->headers($headers), $body);
+        return $this->http->request($method, $this->getApiUrl().$path, $this->headers($headers), $body, $timeout);
     }
 
     /**

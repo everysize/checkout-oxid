@@ -8,6 +8,7 @@ use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
 use Everysize\Checkout\Export\StatusExporter;
 use Everysize\Checkout\Import\ImportException;
+use Everysize\Checkout\Import\ImportReport;
 use Everysize\Checkout\Import\OrderImporter;
 use OxidEsales\Eshop\Core\DatabaseProvider;
 use OxidEsales\Eshop\Core\Registry;
@@ -110,6 +111,8 @@ class Sync
                     $orderId = $result['orderId'];
                     $warnings = array_merge($warnings, $result['warnings']);
                     ++$imported;
+                    // Once, right after the import; never retried, never an error.
+                    $warnings = array_merge($warnings, ImportReport::send($this->client, $everysizeOrderId, $result['report']));
                 }
 
                 if (!$this->links->isNumberReported($orderId)) {
@@ -138,7 +141,7 @@ class Sync
     {
         try {
             $result = $this->exporter->export();
-        } catch (ApiException $e) {
+        } catch (\Throwable $e) {
             $this->protocol->add('Report to everysize failed', $e->getMessage(), false);
 
             return ['messages' => [], 'errors' => [$e->getMessage()]];

@@ -6,7 +6,6 @@ namespace Everysize\Checkout\Tests\Unit;
 
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
-use Everysize\Checkout\Api\Credentials;
 use PHPUnit\Framework\TestCase;
 
 final class ClientTest extends TestCase
@@ -118,5 +117,123 @@ final class ClientTest extends TestCase
         } catch (ApiException $e) {
             self::assertSame([], $http->requests);
         }
+    }
+
+    public function testRefundSendsTheKeyWithALongTimeout(): void
+    {
+        $this->http->queue(200, '{"refundId":"R1","status":"COMPLETED"}');
+
+        self::assertSame('R1', $this->client->refund('ABC123', '5.00', 'key_1-A')['refundId']);
+
+        $request = $this->http->requests[1];
+        self::assertContains('Idempotency-Key: key_1-A', $request['headers']);
+        self::assertSame(Client::REFUND_TIMEOUT, $request['timeout']);
+        self::assertGreaterThanOrEqual(90, Client::REFUND_TIMEOUT, 'the checkout waits up to 60 s for PayPal');
+        self::assertSame(0, $this->http->requests[0]['timeout'], 'the token call keeps the default');
+    }
+
+    public function testAnyTwoHundredIsARefund(): void
+    {
+        $this->http->queue(200, '{"refundId":"R1"}');
+        self::assertSame('R1', $this->client->refund('ABC123', null, 'k')['refundId']);
+    }
+
+    public function testRefundRefusesAKeyTheCheckoutWouldNotTake(): void
+    {
+        foreach (['', str_repeat('a', 65), "a\r\nb", 'a b', 'ä'] as $key) {
+            try {
+                $this->client->refund('ABC123', '5.00', $key);
+                self::fail('key accepted: '.json_encode($key));
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame([], $this->http->requests, 'no request');
+            }
+        }
+        self::assertTrue(Client::isValidIdempotencyKey(str_repeat('a', 64)));
+    }
+
+    public function testServerErrorsAndMissingAnswersAreUnclear(): void
+    {
+        $this->http->queue(502, '{"title":"PayPal did not answer"}');
+        try {
+            $this->client->refund('ABC123', '5.00', 'k');
+            self::fail('no exception');
+        } catch (ApiException $e) {
+            self::assertTrue($e->isOutcomeUnclear());
+        }
+
+        self::assertTrue((new ApiException('timeout'))->isOutcomeUnclear(), 'status 0');
+        foreach ([300, 401, 403, 404, 408, 409, 425, 429, 500] as $status) {
+            self::assertTrue((new ApiException('x', $status))->isOutcomeUnclear(), 'HTTP '.$status.' proves nothing');
+        }
+        self::assertTrue((new ApiException('x', 422, 'IDEMPOTENCY_KEY_REUSED'))->isOutcomeUnclear());
+        self::assertTrue((new ApiException('x', 404, 'PAYPAL_REFUND_FAILED'))->isOutcomeUnclear(), 'the reason counts only with its status');
+        self::assertFalse((new ApiException('x', 422, 'PAYPAL_REFUND_FAILED'))->isOutcomeUnclear());
+        self::assertFalse((new ApiException('x', 422, 'REFUND_AMOUNT_INVALID'))->isOutcomeUnclear());
+        self::assertFalse((new ApiException('x', 400, 'ORDER_NOT_PAID_USING_EVERYSIZE_CHECKOUT_PAYMENTS'))->isOutcomeUnclear());
+        self::assertTrue((new ApiException('x', 422, 'PAYPAL_REFUND_FAILED'))->isSafeRejection());
+    }
+
+    public function testATokenFailureBeforeTheRefundPostIsNotSent(): void
+    {
+        $http = new FakeTransport();
+        $http->queue(503, '{"title":"down"}'); // the token call itself fails
+        $client = new Client($http, new FixedCredentials('id', 'secret'), ApiUrlTest::TEST_URL, '7.5.1');
+
+        try {
+            $client->refund('ABC123', '5.00', 'k');
+            self::fail('no exception');
+        } catch (ApiException $e) {
+            self::assertTrue($e->isNotSent());
+            self::assertFalse($e->isOutcomeUnclear(), 'nothing was sent, nothing is unclear');
+            self::assertFalse($e->isSafeRejection());
+        }
+        self::assertCount(1, $http->requests, 'the token request only');
+    }
+
+    /** A9: only a real list whose entries have a refund ID and a status is readable. */
+    public function testOnlyARealRefundListIsReadable(): void
+    {
+        $this->http->queue(200, '[]');
+        $this->http->queue(200, '[{"refundId":"R1","status":"COMPLETED","amount":"1.00"}]');
+        self::assertSame([], $this->client->getRefunds('ABC123'));
+        self::assertSame('R1', $this->client->getRefunds('ABC123')[0]['refundId']);
+
+        foreach (['{}', '{"refundId":"R1","status":"COMPLETED"}', '[{"status":"COMPLETED"}]', '[{"refundId":"R1"}]', '[{"refundId":"","status":"COMPLETED"}]', '[1,2]', '"x"', 'not json', ''] as $body) {
+            $this->http->queue(200, $body);
+            try {
+                $this->client->getRefunds('ABC123');
+                self::fail('read as a list: '.$body);
+            } catch (ApiException $e) {
+                self::assertStringContainsString('Refunds of ABC123 failed', $e->getMessage());
+            }
+        }
+        $this->http->queue(500, '[]');
+        $this->expectException(ApiException::class);
+        $this->client->getRefunds('ABC123');
+    }
+
+    /** A counting refund without a readable amount makes the whole list unusable (it would count as 0). */
+    public function testACountingRefundWithoutAReadableAmountMakesTheListUnreadable(): void
+    {
+        foreach ([
+            '[{"refundId":"R1","status":"COMPLETED"}]',
+            '[{"refundId":"R1","status":"PENDING","amount":""}]',
+            '[{"refundId":"R1","status":"COMPLETED","amount":"1.234,56"}]',
+            '[{"refundId":"R1","status":"COMPLETED","amount":"1,234.56"}]',
+            '[{"refundId":"R1","status":"completed","amount":null}]',
+            '[{"refundId":"R1","status":"COMPLETED","amount":10}]',
+            '[{"refundId":"R0","status":"COMPLETED","amount":"1.00"},{"refundId":"R1","status":"PENDING","amount":"abc"}]',
+        ] as $body) {
+            $this->http->queue(200, $body);
+            try {
+                $this->client->getRefunds('ABC123');
+                self::fail('read as a list: '.$body);
+            } catch (ApiException $e) {
+                self::assertStringContainsString('Refunds of ABC123 failed', $e->getMessage());
+            }
+        }
+        // A refund that does not count may lack its amount; counting ones read as PayPal writes them.
+        $this->http->queue(200, '[{"refundId":"R1","status":"FAILED"},{"refundId":"R2","status":"CANCELLED","amount":"x"},{"refundId":"R3","status":"COMPLETED","amount":"1234.56"},{"refundId":"R4","status":"PENDING","amount":"10"}]');
+        self::assertCount(4, $this->client->getRefunds('ABC123'));
     }
 }

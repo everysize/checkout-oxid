@@ -4,6 +4,7 @@ use Everysize\Checkout\Controller\Admin\CheckoutAdminController;
 use Everysize\Checkout\Controller\Admin\OrderList;
 use Everysize\Checkout\Controller\Admin\OrderTabController;
 use Everysize\Checkout\Core\ModuleEvents;
+use Everysize\Checkout\Model\Order;
 use Everysize\Checkout\Module;
 
 $sMetadataVersion = '2.1';
@@ -20,6 +21,7 @@ $aModule = [
     'url' => 'https://www.everysize.com',
     'extend' => [
         \OxidEsales\Eshop\Application\Controller\Admin\OrderList::class => OrderList::class,
+        \OxidEsales\Eshop\Application\Model\Order::class => Order::class,
     ],
     'controllers' => [
         'everysize_checkout_admin' => CheckoutAdminController::class,

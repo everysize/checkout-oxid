@@ -75,6 +75,27 @@
 
     {% if everysizeLink.PAYPAL_CAPTURE_ID %}
         <h3>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_TITLE" }) }}</h3>
+        {% if everysizeUnclear %}
+            <div class="msg error"><strong>{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_UNCLEAR_TITLE" }) }}</strong> {{ everysizeUnclearText }}</div>
+            <form name="everysizeRefundRepeat" class="refund" action="{{ oViewConf.getSelfLink()|raw }}" method="post"
+                  onsubmit="return confirm('{{ everysizeUnclearConfirm|e('js') }}');">
+                {{ oViewConf.getHiddenSid()|raw }}
+                <input type="hidden" name="cl" value="everysize_checkout_order">
+                <input type="hidden" name="fnc" value="refund">
+                <input type="hidden" name="oxid" value="{{ oxid }}">
+                <input type="hidden" name="everysize_refund_repeat" value="1">
+                <input type="submit" value="{{ everysizeUnclearButton }}">
+            </form>
+            <form name="everysizeRefundSettle" class="refund" action="{{ oViewConf.getSelfLink()|raw }}" method="post"
+                  onsubmit="return confirm('{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_SETTLE_CONFIRM" })|e('js') }}');">
+                {{ oViewConf.getHiddenSid()|raw }}
+                <input type="hidden" name="cl" value="everysize_checkout_order">
+                <input type="hidden" name="fnc" value="settle">
+                <input type="hidden" name="oxid" value="{{ oxid }}">
+                <input type="hidden" name="everysize_settle_key" value="{{ everysizeUnclearKey }}">
+                <input type="submit" value="{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_SETTLE_BUTTON" }) }}">
+            </form>
+        {% endif %}
         {% if everysizeRefundError %}
             <div class="msg error">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_LOAD_FAILED" }) }} {{ everysizeRefundError }}</div>
         {% else %}
@@ -123,6 +144,7 @@
                 <input type="hidden" name="fnc" value="refund">
                 <input type="hidden" name="oxid" value="{{ oxid }}">
                 <input type="hidden" name="everysize_refund_key" value="{{ everysizeRefundKey }}">
+                <input type="hidden" name="everysize_known_refunded" value="{{ everysizeKnownRefunded }}">
                 <div>
                     <label for="everysize_refund_amount">{{ translate({ ident: "EVERYSIZE_CHECKOUT_REFUND_AMOUNT" }) }}</label>
                     <input type="text" id="everysize_refund_amount" name="everysize_refund_amount" value="{{ everysizeOpenInput }}">

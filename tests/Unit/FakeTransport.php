@@ -8,7 +8,7 @@ use Everysize\Checkout\Api\HttpTransport;
 
 final class FakeTransport implements HttpTransport
 {
-    /** @var array<int, array{method: string, url: string, headers: string[], body: ?string}> */
+    /** @var array<int, array{method: string, url: string, headers: string[], body: ?string, timeout: int}> */
     public array $requests = [];
 
     /** @var array<int, array{status: int, body: string}> */
@@ -19,9 +19,9 @@ final class FakeTransport implements HttpTransport
         $this->responses[] = ['status' => $status, 'body' => $body];
     }
 
-    public function request(string $method, string $url, array $headers, ?string $body = null): array
+    public function request(string $method, string $url, array $headers, ?string $body = null, int $timeout = 0): array
     {
-        $this->requests[] = ['method' => $method, 'url' => $url, 'headers' => $headers, 'body' => $body];
+        $this->requests[] = ['method' => $method, 'url' => $url, 'headers' => $headers, 'body' => $body, 'timeout' => $timeout];
         if ($this->responses === []) {
             throw new \LogicException('unexpected request '.$method.' '.$url);
         }
