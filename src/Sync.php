@@ -6,6 +6,7 @@ namespace Everysize\Checkout;
 
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
+use Everysize\Checkout\Export\RevokedNotice;
 use Everysize\Checkout\Export\StatusExporter;
 use Everysize\Checkout\Import\ImportException;
 use Everysize\Checkout\Import\ImportReport;
@@ -24,6 +25,7 @@ class Sync
     private Client $client;
     private OrderImporter $importer;
     private StatusExporter $exporter;
+    private RevokedNotice $revokedNotice;
     private OrderLinks $links;
     private Protocol $protocol;
 
@@ -34,6 +36,7 @@ class Sync
         StatusExporter $exporter,
         OrderLinks $links,
         Protocol $protocol,
+        RevokedNotice $revokedNotice,
     ) {
         $this->settings = $settings;
         $this->client = $client;
@@ -41,6 +44,7 @@ class Sync
         $this->exporter = $exporter;
         $this->links = $links;
         $this->protocol = $protocol;
+        $this->revokedNotice = $revokedNotice;
     }
 
     /**
@@ -72,6 +76,7 @@ class Sync
             }
             if ($export) {
                 $result = $this->merge($result, $this->export());
+                $this->checkRevoked();
             }
             $this->protocol->cleanup();
 
@@ -161,6 +166,24 @@ class Sync
         }
 
         return ['messages' => [$title], 'errors' => $result['errors']];
+    }
+
+    /**
+     * Cancellation check (a hint for the merchant when an imported order was cancelled at everysize), after import
+     * and export. It must never disturb: it has no influence on the result of the run, an error is at most a warning
+     * in the protocol.
+     */
+    private function checkRevoked(): void
+    {
+        try {
+            $this->revokedNotice->run();
+        } catch (\Throwable $e) {
+            try {
+                $this->protocol->warn('everysize: cancellation check failed', $e->getMessage());
+            } catch (\Throwable $ignored) {
+                // the protocol must never disturb
+            }
+        }
     }
 
     private function orderNumber(string $orderId): string

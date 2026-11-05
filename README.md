@@ -26,6 +26,7 @@ PayPal-Konto des Händlers.
 | everysize → Shop | neue Bestellungen (`PROCESSING`, auch bereits stornierte `REVOKED`) ohne Händler-Bestellnummer | jeder Lauf |
 | Shop → everysize | OXID-Bestellnummer | direkt nach dem Import |
 | Shop → everysize | Import-Meldung: aktueller Shop-Preis und Bestand je Position (Information, ab 1.3.0) | einmal direkt nach dem Import, nicht bei stornierten Bestellungen |
+| everysize → Shop | Hinweis, wenn eine importierte Bestellung bei everysize storniert wurde (ab 1.4.0, siehe „Hinweis bei Storno durch everysize“) | nach Import und Export, jeder Lauf |
 | Shop → everysize | Versand mit Sendungsnummer und Versanddienstleister | Versanddatum gesetzt („Jetzt versenden“), auch wenn die Bestellung inzwischen storniert ist |
 | Shop → everysize | Sendungsnummer nachgetragen oder korrigiert | bis 14 Tage nach der Versandmeldung, nur wenn everysize sie noch nicht hat |
 | Shop → everysize | Erstattung (ganz oder teilweise) | Button im Reiter „everysize“ |
@@ -67,6 +68,27 @@ PayPal-Konto des Händlers.
   everysize Business), meldet es nichts: ein Versand würde sie auf
   `COMPLETED` zurücksetzen, ein Storno den Grund von everysize überschreiben.
   Beim Versand steht das als Fehler im Protokoll.
+* **Hinweis bei Storno durch everysize (ab 1.4.0):** Wird eine bereits importierte Bestellung
+  danach bei everysize storniert (z. B. von der Kundin widerrufen und erstattet), erscheint ein
+  **Hinweis nur für den Händler**: ein rotes Warnzeichen in der Spalte „everysize“ der
+  Bestellliste, die Meldung im Reiter „everysize“ der Bestellung und ein Eintrag (Warnung) im Protokoll:
+  „Bestellung <Nummer> wurde bei everysize storniert. Bitte nicht versenden und im Shop stornieren.“
+  (Deutsch oder Englisch, nach der Sprache der Bestellung). Zeigt der Shop die Bestellung schon als
+  versendet (Versanddatum, Sendungsnummer), lautet er: „… ist hier aber schon als versendet markiert.
+  Bitte prüfen.“ Ist sie im Shop schon storniert oder vollständig erstattet, gibt es keinen Hinweis (eine
+  Teilerstattung, z. B. aus Kulanz, zählt nicht); wird sie danach storniert oder vollständig erstattet,
+  verschwindet der Hinweis wieder. Der Hinweis
+  steht bewusst nicht im Feld „Anmerkung“ der Bestellung (das ist der Text der Kundin und für sie
+  sichtbar), es geht keine E-Mail raus, und er nennt nur die Bestellnummer. **Das Modul ändert dabei
+  nichts:** kein Storno, keine Bestandsbuchung, keine Erstattung, keine Meldung an everysize – das
+  entscheidet der Händler. Die Abfrage läuft nach Import und Export, betrachtet Bestellungen der
+  letzten 30 Tage (Anlegedatum), liest höchstens 500 Zeilen je Lauf (bei mehr die jüngsten); ein Fehler dabei (keine
+  Antwort, 401, 404, 5xx, ungültige Antwort) steht höchstens einmal je Tag und Fehlerart als Warnung im Protokoll (weitere gehen ins OXID-Log), Import und
+  Export laufen unabhängig davon. Jede Bestellung bekommt den Hinweis genau einmal (Rückmeldung
+  `es-revoked` in `everysize_checkout_report`, im Reiter als „Storniert bei everysize“).
+  **Grenzen:** Eine Erstattung, die der Händler direkt in PayPal macht, ohne Storno bei everysize,
+  kennt das Modul nicht. Stornos bei everysize für Bestellungen, die älter als 30 Tage sind, werden
+  nicht mehr abgeglichen.
 * **Sendungsnummer nachmelden:** jede gemeldete Nummer steht als Rückmeldung
   `tracking` (Nummer in der SKU-Spalte). Steht in OXID später eine andere
   Nummer, geht sie einmal per erneuter Versandmeldung raus — bis 14 Tage nach

@@ -27,6 +27,7 @@ class Client
 
     private const ENDPOINT_TOKEN = '/api/v1/oauth/token';
     private const ENDPOINT_ORDERS = '/api/v1/shops/%d/orders?status=PROCESSING,REVOKING,REVOKED&acknowledged=false&pageNumber=0&pageSize=%d';
+    private const ENDPOINT_REVOKED_ORDERS = '/api/v1/shops/%d/orders?status=REVOKED&acknowledged=true&from=%s&to=%s&pageSize=%d&pageNumber=%d';
     private const ENDPOINT_ORDER = '/api/v1/shops/%d/orders/%s';
     private const ENDPOINT_ORDER_NUMBER = '/api/v1/shops/%d/orders/%s/merchant-order-number';
     private const ENDPOINT_IMPORT_REPORT = '/api/v1/shops/%d/orders/%s/import-report';
@@ -43,6 +44,11 @@ class Client
      * on a refund that is still being booked.
      */
     public const REFUND_TIMEOUT = 100;
+
+    /** The cancellation check reads at most this many rows per run. */
+    public const REVOKED_MAX_ROWS = 500;
+
+    private const REVOKED_PAGE_SIZE = 100;
 
     /** Renew the token this many seconds before it expires. */
     private const TOKEN_MARGIN = 60;
@@ -125,6 +131,59 @@ class Client
         $content = $this->decode($response['body'])['content'] ?? [];
 
         return \is_array($content) ? array_values(array_filter($content, 'is_array')) : [];
+    }
+
+    /**
+     * Orders cancelled (REVOKED) at everysize that the shop imported, created in the given period. pageNumber is a row
+     * offset, not a page index; reads up to totalElements, at most REVOKED_MAX_ROWS rows (above that the youngest ones:
+     * the list is sorted oldest first, so the reading starts at totalElements - REVOKED_MAX_ROWS). Only a real list under
+     * "content" (and a readable totalElements) counts: anything else is an ApiException, there are no partial results.
+     *
+     * @return array<int, array<string, mixed>>
+     *
+     * @throws ApiException
+     */
+    public function getRevokedOrders(\DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        $shopId = $this->getShopId();
+        // The checkout compares the local time of the strings (Europe/Berlin) without a time zone conversion.
+        $zone = new \DateTimeZone('Europe/Berlin');
+        $fromParam = rawurlencode($from->setTimezone($zone)->format(\DateTimeInterface::ATOM));
+        $toParam = rawurlencode($to->setTimezone($zone)->format(\DateTimeInterface::ATOM));
+
+        // The list is sorted by creation date, oldest first: the first page only tells the total. Above REVOKED_MAX_ROWS
+        // the youngest rows are read (the oldest ones are the cancellations the merchant most likely dealt with).
+        $rows = [];
+        $offset = 0;
+        $first = true;
+        while (true) {
+            $response = $this->call('GET', sprintf(self::ENDPOINT_REVOKED_ORDERS, $shopId, $fromParam, $toParam, self::REVOKED_PAGE_SIZE, $offset));
+            $data = json_decode($response['body'], true);
+            if (
+                $response['status'] !== 200 || !\is_array($data) || !\is_array($data['content'] ?? null)
+                || $data['content'] !== array_values($data['content']) || !\is_int($data['totalElements'] ?? null) || $data['totalElements'] < 0
+            ) {
+                throw $this->error('Get revoked orders', $response);
+            }
+            $total = $data['totalElements'];
+            if ($first && $total > self::REVOKED_MAX_ROWS) {
+                $first = false;
+                $offset = $total - self::REVOKED_MAX_ROWS; // the first page is dropped
+                continue;
+            }
+            $first = false;
+            foreach ($data['content'] as $entry) {
+                if (\is_array($entry) && \is_string($entry['everysizeOrderId'] ?? null) && $entry['everysizeOrderId'] !== '') {
+                    $rows[] = $entry;
+                }
+            }
+            $offset += self::REVOKED_PAGE_SIZE;
+            if ($data['content'] === [] || $offset >= $total) {
+                break;
+            }
+        }
+
+        return \array_slice($rows, 0, self::REVOKED_MAX_ROWS);
     }
 
     /**

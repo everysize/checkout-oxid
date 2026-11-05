@@ -40,6 +40,7 @@ class OrderList extends OrderList_parent
         $links = ContainerFactory::getInstance()->getContainer()->get(OrderLinks::class);
 
         $this->_aViewData['everysizeOrderIds'] = $links->getEverysizeOrderIds($orderIds);
+        $this->_aViewData['everysizeRevokedNotes'] = $links->getRevokedNotes($orderIds);
         $this->_aViewData['everysizeFilter'] = self::filter();
         $this->_aViewData['everysizeSearch'] = self::search();
 

@@ -21,6 +21,8 @@ services:
 
   Everysize\Checkout\Export\StatusExporter: ~
 
+  Everysize\Checkout\Export\RevokedNotice: ~
+
   Everysize\Checkout\Sync:
     public: true
 

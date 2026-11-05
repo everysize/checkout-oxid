@@ -8,6 +8,7 @@ use Everysize\Checkout\Api\Amount;
 use Everysize\Checkout\Api\ApiException;
 use Everysize\Checkout\Api\Client;
 use Everysize\Checkout\Display;
+use Everysize\Checkout\Export\RevokedNotice;
 use Everysize\Checkout\ManualRefund;
 use Everysize\Checkout\OrderLinks;
 use Everysize\Checkout\Protocol;
@@ -50,6 +51,7 @@ class OrderTabController extends AdminDetailsController
             $this->addTplParam('everysizeImported', $this->dateTime($link['CREATED']));
             $this->addTplParam('everysizeNumberReported', $link['NUMBER_REPORTED'] !== null ? $this->dateTime($link['NUMBER_REPORTED']) : '');
             $this->addTplParam('everysizeReports', $this->reportRows($links->getReports($orderId)));
+            $this->addTplParam('everysizeRevokedNote', $this->revokedNote($links, $orderId));
         }
 
         if ($link !== null && $link['PAYPAL_CAPTURE_ID'] !== '') {
@@ -282,10 +284,16 @@ class OrderTabController extends AdminDetailsController
                 $subject = '';
             }
             // A refund from the tab stores its amount as reason; the automatic one the refund ID or why it was not done.
+            if ($kind === OrderLinks::KIND_REVOKED_AT_EVERYSIZE) {
+                $reason = ''; // OPEN / SHIPPED is the kind of the hint, shown above the tab
+            }
             $detail = $kind === OrderLinks::KIND_REFUND && is_numeric($reason) ? $this->formatAmount((float) $reason) : $reason;
             $resultIdent = $kind === OrderLinks::KIND_REFUND && $result !== OrderLinks::RESULT_SENT
                 ? 'EVERYSIZE_CHECKOUT_RESULT_REFUND_'.$result
                 : 'EVERYSIZE_CHECKOUT_RESULT_'.$result;
+            if ($kind === OrderLinks::KIND_REVOKED_AT_EVERYSIZE) {
+                $resultIdent = 'EVERYSIZE_CHECKOUT_RESULT_REVOKED_'.$result;
+            }
 
             $rows[] = [
                 'time' => $this->dateTime((string) $report['CREATED']),
@@ -297,6 +305,25 @@ class OrderTabController extends AdminDetailsController
         }
 
         return $rows;
+    }
+
+    /**
+     * The hint of the cancellation check in the language of the admin: the order is cancelled at everysize. Empty if
+     * there is none: not cancelled there, or closed in the shop by now (cancelled, refunded in full, every item
+     * cancelled), then there is nothing left to warn about.
+     */
+    private function revokedNote(OrderLinks $links, string $orderId): string
+    {
+        $notes = $links->getRevokedNotes([$orderId]);
+        $info = isset($notes[$orderId]) ? $links->getRevokedCheckInfo($orderId) : null;
+        if ($info === null) {
+            return '';
+        }
+
+        // getLanguageAbbr() without an id is the language being edited, not the one of the admin interface.
+        $language = Registry::getLang();
+
+        return RevokedNotice::text($notes[$orderId], (string) $language->getLanguageAbbr($language->getTplLanguage()), $info['number']);
     }
 
     /** Stored time or PayPal's ISO 8601 time as shop time, e.g. "09.10.2026 15:27". */

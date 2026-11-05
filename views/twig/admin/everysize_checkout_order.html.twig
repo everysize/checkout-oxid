@@ -43,6 +43,9 @@
 {% if everysizeMessage %}
     <div class="msg {{ everysizeMessage.type }}">{{ everysizeMessage.text }}</div>
 {% endif %}
+{% if everysizeRevokedNote %}
+    <div class="msg error everysize-revoked"><strong>{{ everysizeRevokedNote }}</strong></div>
+{% endif %}
 {% if everysizeLink is empty %}
     <p class="edittext">{{ translate({ ident: "EVERYSIZE_CHECKOUT_NOT_EVERYSIZE" }) }}</p>
 {% else %}

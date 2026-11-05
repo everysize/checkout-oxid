@@ -127,4 +127,9 @@ $aLang = [
     'EVERYSIZE_CHECKOUT_REFUND_REPEAT_BUTTON' => 'Repeat refund of %s',
     'EVERYSIZE_CHECKOUT_REFUND_REPEAT_CONFIRM' => 'Repeat the refund of %s? The refunds at PayPal are read first. If the first request did not go through, the amount is paid out now. This cannot be undone.',
     'EVERYSIZE_CHECKOUT_REFUND_REST' => 'the rest of the payment',
+    'EVERYSIZE_CHECKOUT_PROTOCOL_WARNING' => 'warning',
+    'EVERYSIZE_CHECKOUT_REPORT_es-revoked' => 'Cancelled at everysize',
+    'EVERYSIZE_CHECKOUT_RESULT_REVOKED_noted' => 'hint written',
+    'EVERYSIZE_CHECKOUT_RESULT_REVOKED_skipped' => 'no hint needed – already cancelled or refunded in the shop',
+    'EVERYSIZE_CHECKOUT_LIST_REVOKED' => 'cancelled at everysize but not in the shop yet – please do not ship',
 ];

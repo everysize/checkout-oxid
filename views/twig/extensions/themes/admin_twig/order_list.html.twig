@@ -41,6 +41,6 @@
     {% set cells %}{{ parent() }}{% endset %}
     {% set parts = cells|split('<td') %}
     {{ parts|slice(0, parts|length - 1)|join('<td')|raw }}
-    <td valign="top" class="{{ everysizeClass }} everysize_order_id" height="15"><div class="listitemfloating"><a href="Javascript:top.oxid.admin.editThis('{{ listitem.oxorder__oxid.value }}');" class="{{ everysizeClass }}">{{ everysizeOrderIds[listitem.oxorder__oxid.value] ?? "" }}</a></div></td>
+    <td valign="top" class="{{ everysizeClass }} everysize_order_id" height="15"><div class="listitemfloating"><a href="Javascript:top.oxid.admin.editThis('{{ listitem.oxorder__oxid.value }}');" class="{{ everysizeClass }}">{{ everysizeOrderIds[listitem.oxorder__oxid.value] ?? "" }}{% if everysizeRevokedNotes[listitem.oxorder__oxid.value] is defined %} <b style="color: #c02124;" title="{{ translate({ ident: "EVERYSIZE_CHECKOUT_LIST_REVOKED" }) }}">&#9888;</b>{% endif %}</a></div></td>
     <td{{ parts|last|raw }}
 {% endblock %}

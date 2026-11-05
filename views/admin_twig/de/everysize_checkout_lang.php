@@ -127,4 +127,9 @@ $aLang = [
     'EVERYSIZE_CHECKOUT_REFUND_REPEAT_BUTTON' => 'Erstattung über %s wiederholen',
     'EVERYSIZE_CHECKOUT_REFUND_REPEAT_CONFIRM' => 'Die Erstattung über %s wiederholen? Zuerst werden die Erstattungen bei PayPal gelesen. Ging die erste Anfrage nicht durch, wird der Betrag jetzt ausgezahlt. Das lässt sich nicht rückgängig machen.',
     'EVERYSIZE_CHECKOUT_REFUND_REST' => 'den Rest der Zahlung',
+    'EVERYSIZE_CHECKOUT_PROTOCOL_WARNING' => 'Warnung',
+    'EVERYSIZE_CHECKOUT_REPORT_es-revoked' => 'Storniert bei everysize',
+    'EVERYSIZE_CHECKOUT_RESULT_REVOKED_noted' => 'Hinweis geschrieben',
+    'EVERYSIZE_CHECKOUT_RESULT_REVOKED_skipped' => 'kein Hinweis nötig – im Shop schon storniert oder erstattet',
+    'EVERYSIZE_CHECKOUT_LIST_REVOKED' => 'bei everysize storniert, im Shop noch nicht – bitte nicht versenden',
 ];

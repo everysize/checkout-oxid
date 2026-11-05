@@ -26,6 +26,15 @@ class OrderLinks
     /** SKU of the automatic full refund after a cancellation before shipping (REASON = PayPal refund ID or why not). */
     public const AUTO_REFUND = 'auto-decline';
 
+    /**
+     * Marker of the cancellation check: the order is cancelled at everysize and the merchant was told (or needed no
+     * hint). Unique per order (empty SKU). REASON is the kind of hint (OPEN or SHIPPED) or empty. At most 16
+     * characters: the column KIND.
+     */
+    public const KIND_REVOKED_AT_EVERYSIZE = 'es-revoked';
+    /** A hint for the merchant was written for the order (KIND_REVOKED_AT_EVERYSIZE). */
+    public const RESULT_NOTED = 'noted';
+
     /** Sent to everysize. */
     public const RESULT_SENT = 'sent';
     /** Not sent: the order was already revoked at everysize. */
@@ -338,6 +347,121 @@ class OrderLinks
                     OR TRIM(o.OXTRACKCODE) <> ''
                     OR EXISTS (SELECT 1 FROM everysize_checkout_report sr WHERE sr.ORDERID = o.OXID AND sr.KIND IN (:fulfillment, :tracking)))",
             [':orderId' => $orderId, ':fulfillment' => self::KIND_FULFILLMENT, ':tracking' => self::KIND_TRACKING]
+        );
+    }
+
+    /**
+     * What the cancellation check needs to know about the shop order: its number and language, whether it is
+     * closed (the whole order or every item cancelled in OXID, a cancellation this module reported itself, which
+     * means it came from the shop, or the whole amount refunded: see isFullyRefunded) and whether shipping shows.
+     * A partial refund (goodwill) does not close it. $paidCents is what the customer paid (everysize grossPrice);
+     * without it the total of the shop order counts. null: there is no such order any more.
+     *
+     * @return array{number: string, lang: int, closed: bool, shipped: bool}|null
+     */
+    public function getRevokedCheckInfo(string $orderId, ?int $paidCents = null): ?array
+    {
+        $row = DatabaseProvider::getDb(DatabaseProvider::FETCH_MODE_ASSOC)->getRow(
+            'SELECT o.OXORDERNR, o.OXLANG, o.OXSTORNO, o.OXTOTALORDERSUM,
+                    (SELECT COUNT(*) FROM oxorderarticles a WHERE a.OXORDERID = o.OXID) AS ITEMS,
+                    (SELECT COUNT(*) FROM oxorderarticles a WHERE a.OXORDERID = o.OXID AND a.OXSTORNO = 0) AS ACTIVE_ITEMS,
+                    (SELECT COUNT(*) FROM everysize_checkout_report r WHERE r.ORDERID = o.OXID AND r.KIND = :revocation) AS REVOCATIONS
+             FROM oxorder o
+             WHERE o.OXID = :orderId',
+            [':orderId' => $orderId, ':revocation' => self::KIND_REVOCATION]
+        );
+        if (!$row) {
+            return null;
+        }
+
+        $closed = (int) $row['OXSTORNO'] === 1
+            || ((int) $row['ITEMS'] > 0 && (int) $row['ACTIVE_ITEMS'] === 0)
+            || (int) $row['REVOCATIONS'] > 0;
+        if (!$closed) {
+            $paid = $paidCents !== null && $paidCents > 0 ? $paidCents : (int) round((float) $row['OXTOTALORDERSUM'] * 100);
+            $closed = $this->isFullyRefunded($orderId, $paid);
+        }
+
+        return [
+            'number' => (string) $row['OXORDERNR'],
+            'lang' => (int) $row['OXLANG'],
+            'closed' => $closed,
+            'shipped' => $this->isShipped($orderId),
+        ];
+    }
+
+    /**
+     * The refunds through everysize that were reported for the order (result sent) add up to the whole amount
+     * paid. The automatic refund after a cancellation is always the whole amount. Open or unclear refunds
+     * (open entry, "settled", "known") count for nothing. Compared in cents.
+     */
+    public function isFullyRefunded(string $orderId, int $paidCents): bool
+    {
+        $rows = DatabaseProvider::getDb(DatabaseProvider::FETCH_MODE_ASSOC)->getAll(
+            'SELECT SKU, REASON FROM everysize_checkout_report WHERE ORDERID = :orderId AND KIND = :kind AND RESULT = :sent',
+            [':orderId' => $orderId, ':kind' => self::KIND_REFUND, ':sent' => self::RESULT_SENT]
+        );
+
+        return self::coversPaid($rows, $paidCents);
+    }
+
+    /**
+     * @param array<int, array{SKU: string, REASON: string}> $refundReports reports of kind refund with result sent
+     */
+    public static function coversPaid(array $refundReports, int $paidCents): bool
+    {
+        $sum = 0;
+        foreach ($refundReports as $report) {
+            if ((string) $report['SKU'] === self::AUTO_REFUND) {
+                return true;
+            }
+            try {
+                $sum += Api\Amount::cents((string) $report['REASON']);
+            } catch (Api\ApiException $e) {
+                // no readable amount: it counts for nothing
+            }
+        }
+
+        return $paidCents > 0 && $sum >= $paidCents;
+    }
+
+    /**
+     * Orders of the given list that carry the marker of the cancellation check with a hint (for the order list and
+     * the tab). Orders that are closed in the shop by now (cancelled, refunded in full, every item cancelled) are
+     * left out: there is nothing left to warn about.
+     *
+     * @param array<int, string> $orderIds
+     *
+     * @return array<string, string> order id => REASON (OPEN or SHIPPED)
+     */
+    public function getRevokedNotes(array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+        $notes = [];
+        foreach ($this->getRevokedMarkers($orderIds) as $row) {
+            $info = $this->getRevokedCheckInfo((string) $row['ORDERID']);
+            if ($info !== null && !$info['closed']) {
+                $notes[(string) $row['ORDERID']] = (string) $row['REASON'];
+            }
+        }
+
+        return $notes;
+    }
+
+    /**
+     * @param array<int, string> $orderIds
+     *
+     * @return array<int, array{ORDERID: string, REASON: string}> markers of the cancellation check that carry a hint
+     */
+    protected function getRevokedMarkers(array $orderIds): array
+    {
+        $db = DatabaseProvider::getDb(DatabaseProvider::FETCH_MODE_ASSOC);
+
+        return $db->getAll(
+            'SELECT ORDERID, REASON FROM everysize_checkout_report WHERE KIND = '.$db->quote(self::KIND_REVOKED_AT_EVERYSIZE)
+            .' AND RESULT = '.$db->quote(self::RESULT_NOTED).' AND ORDERID IN ('.implode(',', array_map([$db, 'quote'], $orderIds)).')'
         );
     }
 

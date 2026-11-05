@@ -17,6 +17,7 @@
     .everysize table.protocol th, .everysize table.protocol td { border-bottom: 1px solid #ddd; padding: 5px 8px; text-align: left; vertical-align: top; }
     .everysize table.protocol td.message { white-space: pre-wrap; font-family: monospace; font-size: 11px; }
     .everysize .state-ok { color: #393; }
+    .everysize .state-warning { color: #b60; font-weight: bold; }
     .everysize .state-error { color: #c00; font-weight: bold; }
 </style>
 
@@ -151,6 +152,8 @@
                     <td>
                         {% if entry.STATE == 1 %}
                             <span class="state-ok">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_OK" }) }}</span>
+                        {% elseif entry.STATE == 2 %}
+                            <span class="state-warning">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_WARNING" }) }}</span>
                         {% else %}
                             <span class="state-error">{{ translate({ ident: "EVERYSIZE_CHECKOUT_PROTOCOL_ERROR" }) }}</span>
                         {% endif %}
